@@ -6,8 +6,10 @@ from rest_framework.views import APIView
 from rest_framework.generics import ListAPIView, RetrieveAPIView
 from django.db import connection
 from django.http import JsonResponse
-from django.db.models import Max, Avg
+from django.db.models import Max, Avg, Q, Count, Sum
 from django.shortcuts import get_object_or_404
+from django.utils.dateparse import parse_date
+from datetime import datetime, timedelta
 import time
 import random
 from silk.profiling.profiler import silk_profile
@@ -16,17 +18,143 @@ from .serializers import UserSerializer, ProductSerializer, OrderSerializer, Ord
 
 
 class UserViewSet(viewsets.ModelViewSet):
-    """ViewSet for User model"""
+    """ViewSet for User model with dynamic filtering"""
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]
 
+    def get_queryset(self):
+        """
+        Dynamic filtering for User ViewSet
+        """
+        queryset = User.objects.all()
+
+        # Search functionality
+        search = self.request.query_params.get('search', None)
+        if search:
+            queryset = queryset.filter(
+                Q(username__icontains=search) |
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(email__icontains=search)
+            )
+
+        # Email domain filtering
+        email_domain = self.request.query_params.get('email_domain', None)
+        if email_domain:
+            queryset = queryset.filter(email__endswith=f'@{email_domain}')
+
+        # Active status filtering
+        is_active = self.request.query_params.get('is_active', None)
+        if is_active is not None:
+            if is_active.lower() == 'true':
+                queryset = queryset.filter(is_active=True)
+            elif is_active.lower() == 'false':
+                queryset = queryset.filter(is_active=False)
+
+        # Date range filtering
+        date_joined_after = self.request.query_params.get('date_joined_after', None)
+        date_joined_before = self.request.query_params.get('date_joined_before', None)
+
+        if date_joined_after:
+            try:
+                date_after = parse_date(date_joined_after)
+                if date_after:
+                    queryset = queryset.filter(date_joined__gte=date_after)
+            except ValueError:
+                pass
+
+        if date_joined_before:
+            try:
+                date_before = parse_date(date_joined_before)
+                if date_before:
+                    queryset = queryset.filter(date_joined__lte=date_before)
+            except ValueError:
+                pass
+
+        # Ordering
+        ordering = self.request.query_params.get('ordering', None)
+        if ordering:
+            allowed_fields = ['username', 'email', 'first_name', 'last_name', 'date_joined',
+                            '-username', '-email', '-first_name', '-last_name', '-date_joined']
+            if ordering in allowed_fields:
+                queryset = queryset.order_by(ordering)
+        else:
+            queryset = queryset.order_by('username')
+
+        return queryset
+
 
 class ProductViewSet(viewsets.ModelViewSet):
-    """ViewSet for Product model"""
+    """ViewSet for Product model with dynamic filtering"""
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
     permission_classes = [IsAuthenticatedOrReadOnly]
+
+    def get_queryset(self):
+        """
+        Dynamic filtering for Product ViewSet
+        """
+        queryset = Product.objects.all()
+
+        # Search functionality
+        search = self.request.query_params.get('search', None)
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search) |
+                Q(description__icontains=search)
+            )
+
+        # Stock availability filtering
+        in_stock = self.request.query_params.get('in_stock', None)
+        if in_stock is not None:
+            if in_stock.lower() == 'true':
+                queryset = queryset.filter(stock__gt=0)
+            elif in_stock.lower() == 'false':
+                queryset = queryset.filter(stock=0)
+
+        # Price range filtering
+        min_price = self.request.query_params.get('min_price', None)
+        max_price = self.request.query_params.get('max_price', None)
+
+        if min_price is not None:
+            try:
+                queryset = queryset.filter(price__gte=float(min_price))
+            except ValueError:
+                pass
+
+        if max_price is not None:
+            try:
+                queryset = queryset.filter(price__lte=float(max_price))
+            except ValueError:
+                pass
+
+        # Stock range filtering
+        min_stock = self.request.query_params.get('min_stock', None)
+        max_stock = self.request.query_params.get('max_stock', None)
+
+        if min_stock is not None:
+            try:
+                queryset = queryset.filter(stock__gte=int(min_stock))
+            except ValueError:
+                pass
+
+        if max_stock is not None:
+            try:
+                queryset = queryset.filter(stock__lte=int(max_stock))
+            except ValueError:
+                pass
+
+        # Ordering
+        ordering = self.request.query_params.get('ordering', None)
+        if ordering:
+            allowed_fields = ['name', 'price', 'stock', 'id', '-name', '-price', '-stock', '-id']
+            if ordering in allowed_fields:
+                queryset = queryset.order_by(ordering)
+        else:
+            queryset = queryset.order_by('name')
+
+        return queryset
 
     @action(detail=True, methods=['get'])
     def in_stock(self, request, pk=None):
@@ -36,25 +164,147 @@ class ProductViewSet(viewsets.ModelViewSet):
 
 
 class OrderViewSet(viewsets.ModelViewSet):
-    """ViewSet for Order model"""
+    """ViewSet for Order model with dynamic filtering"""
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
-        """Filter orders by current user"""
-        return Order.objects.filter(user=self.request.user)
+        """
+        Dynamic filtering for Order ViewSet with user-specific access
+        """
+        queryset = Order.objects.prefetch_related('order_items__product').filter(user=self.request.user)
+
+        # Status filtering
+        status = self.request.query_params.get('status', None)
+        if status:
+            queryset = queryset.filter(status=status)
+
+        # Date range filtering
+        created_after = self.request.query_params.get('created_after', None)
+        created_before = self.request.query_params.get('created_before', None)
+
+        if created_after:
+            try:
+                date_after = parse_date(created_after)
+                if date_after:
+                    queryset = queryset.filter(created_at__gte=date_after)
+            except ValueError:
+                pass
+
+        if created_before:
+            try:
+                date_before = parse_date(created_before)
+                if date_before:
+                    queryset = queryset.filter(created_at__lte=date_before)
+            except ValueError:
+                pass
+
+        # Filter by orders with/without items
+        has_items = self.request.query_params.get('has_items', None)
+        if has_items is not None:
+            if has_items.lower() == 'true':
+                queryset = queryset.filter(order_items__isnull=False).distinct()
+            elif has_items.lower() == 'false':
+                queryset = queryset.filter(order_items__isnull=True)
+
+        # Ordering
+        ordering = self.request.query_params.get('ordering', None)
+        if ordering:
+            allowed_fields = ['created_at', 'status', 'order_id', '-created_at', '-status', '-order_id']
+            if ordering in allowed_fields:
+                queryset = queryset.order_by(ordering)
+        else:
+            queryset = queryset.order_by('-created_at')
+
+        return queryset
 
     def perform_create(self, serializer):
         """Set the user to the current user when creating an order"""
         serializer.save(user=self.request.user)
 
+    @action(detail=False, methods=['get'])
+    def statistics(self, request):
+        """Get order statistics for the current user"""
+        user_orders = self.get_queryset()
+
+        stats = {
+            'total_orders': user_orders.count(),
+            'pending_orders': user_orders.filter(status='Pending').count(),
+            'confirmed_orders': user_orders.filter(status='Confirmed').count(),
+            'cancelled_orders': user_orders.filter(status='Cancelled').count(),
+            'orders_with_items': user_orders.filter(order_items__isnull=False).distinct().count(),
+            'orders_without_items': user_orders.filter(order_items__isnull=True).count(),
+        }
+
+        return Response(stats)
+
 
 class OrderItemViewSet(viewsets.ModelViewSet):
-    """ViewSet for OrderItem model"""
+    """ViewSet for OrderItem model with dynamic filtering"""
     queryset = OrderItem.objects.all()
     serializer_class = OrderItemSerializer
     permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        """
+        Dynamic filtering for OrderItem ViewSet
+        """
+        queryset = OrderItem.objects.select_related('order', 'product')
+
+        # Filter by order
+        order_id = self.request.query_params.get('order_id', None)
+        if order_id:
+            queryset = queryset.filter(order__order_id=order_id)
+
+        # Filter by product
+        product_id = self.request.query_params.get('product_id', None)
+        if product_id:
+            queryset = queryset.filter(product__id=product_id)
+
+        # Quantity range filtering
+        min_quantity = self.request.query_params.get('min_quantity', None)
+        max_quantity = self.request.query_params.get('max_quantity', None)
+
+        if min_quantity is not None:
+            try:
+                queryset = queryset.filter(quantity__gte=int(min_quantity))
+            except ValueError:
+                pass
+
+        if max_quantity is not None:
+            try:
+                queryset = queryset.filter(quantity__lte=int(max_quantity))
+            except ValueError:
+                pass
+
+        # Filter by subtotal range
+        min_subtotal = self.request.query_params.get('min_subtotal', None)
+        max_subtotal = self.request.query_params.get('max_subtotal', None)
+
+        if min_subtotal is not None:
+            try:
+                queryset = queryset.filter(product__price__gte=float(min_subtotal))
+            except ValueError:
+                pass
+
+        if max_subtotal is not None:
+            try:
+                queryset = queryset.filter(product__price__lte=float(max_subtotal))
+            except ValueError:
+                pass
+
+        # Ordering
+        ordering = self.request.query_params.get('ordering', None)
+        if ordering:
+            allowed_fields = ['quantity', 'product__name', 'order__created_at',
+                            '-quantity', '-product__name', '-order__created_at']
+            if ordering in allowed_fields:
+                queryset = queryset.order_by(ordering)
+        else:
+            queryset = queryset.order_by('-order__created_at')
+
+        return queryset
 
 
 class ProfilingExampleView(APIView):
@@ -195,12 +445,15 @@ class PerformanceTestView(APIView):
 
 class ProductListAPIView(ListAPIView):
     """
-    Generic view for listing all products (read-only)
+    Generic view for listing all products with advanced dynamic filtering
 
-    ListAPIView provides:
-    - GET method to retrieve a list of objects
-    - Automatic pagination
-    - Built-in filtering and ordering capabilities
+    Available filters:
+    - search: Search in name and description
+    - in_stock: true/false for stock availability
+    - min_price, max_price: Price range filtering
+    - category: Filter by category (if you add this field)
+    - ordering: Sort by any field (name, price, stock, created_at)
+    - limit: Limit number of results
     """
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
@@ -208,26 +461,76 @@ class ProductListAPIView(ListAPIView):
 
     def get_queryset(self):
         """
-        Override get_queryset to add custom filtering
+        Advanced dynamic filtering for products
         """
         queryset = Product.objects.all()
 
-        # Filter by stock availability
-        in_stock_only = self.request.query_params.get('in_stock', None)
-        if in_stock_only is not None:
-            if in_stock_only.lower() == 'true':
+        # Search functionality
+        search = self.request.query_params.get('search', None)
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search) |
+                Q(description__icontains=search)
+            )
+
+        # Stock availability filtering
+        in_stock = self.request.query_params.get('in_stock', None)
+        if in_stock is not None:
+            if in_stock.lower() == 'true':
                 queryset = queryset.filter(stock__gt=0)
-            elif in_stock_only.lower() == 'false':
+            elif in_stock.lower() == 'false':
                 queryset = queryset.filter(stock=0)
 
-        # Filter by price range
+        # Price range filtering
         min_price = self.request.query_params.get('min_price', None)
         max_price = self.request.query_params.get('max_price', None)
 
         if min_price is not None:
-            queryset = queryset.filter(price__gte=min_price)
+            try:
+                queryset = queryset.filter(price__gte=float(min_price))
+            except ValueError:
+                pass  # Ignore invalid price values
+
         if max_price is not None:
-            queryset = queryset.filter(price__lte=max_price)
+            try:
+                queryset = queryset.filter(price__lte=float(max_price))
+            except ValueError:
+                pass
+
+        # Stock range filtering
+        min_stock = self.request.query_params.get('min_stock', None)
+        max_stock = self.request.query_params.get('max_stock', None)
+
+        if min_stock is not None:
+            try:
+                queryset = queryset.filter(stock__gte=int(min_stock))
+            except ValueError:
+                pass
+
+        if max_stock is not None:
+            try:
+                queryset = queryset.filter(stock__lte=int(max_stock))
+            except ValueError:
+                pass
+
+        # Ordering
+        ordering = self.request.query_params.get('ordering', None)
+        if ordering:
+            # Validate ordering field to prevent injection
+            allowed_fields = ['name', 'price', 'stock', 'id', '-name', '-price', '-stock', '-id']
+            if ordering in allowed_fields:
+                queryset = queryset.order_by(ordering)
+        else:
+            # Default ordering
+            queryset = queryset.order_by('name')
+
+        # Limit results
+        limit = self.request.query_params.get('limit', None)
+        if limit is not None:
+            try:
+                queryset = queryset[:int(limit)]
+            except ValueError:
+                pass
 
         return queryset
 
@@ -261,26 +564,91 @@ class ProductDetailAPIView(RetrieveAPIView):
 
 class UserListAPIView(ListAPIView):
     """
-    Generic view for listing users with custom filtering
+    Generic view for listing users with advanced dynamic filtering
+
+    Available filters:
+    - search: Search in username, first_name, last_name, email
+    - username: Exact username match
+    - email_domain: Filter by email domain
+    - is_active: Filter by active status
+    - date_joined_after, date_joined_before: Date range filtering
+    - ordering: Sort by any field
+    - limit: Limit number of results
     """
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticated]  # Only authenticated users can view user list
 
     def get_queryset(self):
         """
-        Custom queryset with filtering options
+        Advanced dynamic filtering for users
         """
         queryset = User.objects.all()
 
-        # Filter by username (partial match)
+        # Search functionality
+        search = self.request.query_params.get('search', None)
+        if search:
+            queryset = queryset.filter(
+                Q(username__icontains=search) |
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(email__icontains=search)
+            )
+
+        # Exact username match
         username = self.request.query_params.get('username', None)
         if username:
             queryset = queryset.filter(username__icontains=username)
 
-        # Filter by email domain
+        # Email domain filtering
         email_domain = self.request.query_params.get('email_domain', None)
         if email_domain:
             queryset = queryset.filter(email__endswith=f'@{email_domain}')
+
+        # Active status filtering
+        is_active = self.request.query_params.get('is_active', None)
+        if is_active is not None:
+            if is_active.lower() == 'true':
+                queryset = queryset.filter(is_active=True)
+            elif is_active.lower() == 'false':
+                queryset = queryset.filter(is_active=False)
+
+        # Date range filtering for date_joined
+        date_joined_after = self.request.query_params.get('date_joined_after', None)
+        date_joined_before = self.request.query_params.get('date_joined_before', None)
+
+        if date_joined_after:
+            try:
+                date_after = parse_date(date_joined_after)
+                if date_after:
+                    queryset = queryset.filter(date_joined__gte=date_after)
+            except ValueError:
+                pass
+
+        if date_joined_before:
+            try:
+                date_before = parse_date(date_joined_before)
+                if date_before:
+                    queryset = queryset.filter(date_joined__lte=date_before)
+            except ValueError:
+                pass
+
+        # Ordering
+        ordering = self.request.query_params.get('ordering', None)
+        if ordering:
+            allowed_fields = ['username', 'email', 'first_name', 'last_name', 'date_joined',
+                            '-username', '-email', '-first_name', '-last_name', '-date_joined']
+            if ordering in allowed_fields:
+                queryset = queryset.order_by(ordering)
+        else:
+            queryset = queryset.order_by('username')
+
+        # Limit results
+        limit = self.request.query_params.get('limit', None)
+        if limit is not None:
+            try:
+                queryset = queryset[:int(limit)]
+            except ValueError:
+                pass
 
         return queryset
 
@@ -308,25 +676,76 @@ class UserDetailAPIView(RetrieveAPIView):
 
 class OrderListAPIView(ListAPIView):
     """
-    Generic view for listing orders with user-specific filtering and optimized queries
+    Generic view for listing orders with advanced dynamic filtering and optimized queries
+
+    Available filters:
+    - status: Filter by order status (Pending, Confirmed, Cancelled)
+    - created_after, created_before: Date range filtering
+    - min_total, max_total: Total price range filtering
+    - has_items: Filter orders with/without items
+    - ordering: Sort by any field
+    - limit: Limit number of results
     """
     serializer_class = OrderSerializer
     permission_classes = [IsAuthenticated]
 
     def get_queryset(self):
         """
-        Filter orders by current user with optimized queries and status filtering
+        Advanced dynamic filtering for orders with optimized queries
         """
-        # Use prefetch_related for optimized queries (from provided version)
+        # Use prefetch_related for optimized queries
         queryset = Order.objects.prefetch_related('order_items__product').filter(user=self.request.user)
 
-        # Filter by status
+        # Status filtering
         status = self.request.query_params.get('status', None)
         if status:
             queryset = queryset.filter(status=status)
 
-        # Order by creation date (newest first)
-        queryset = queryset.order_by('-created_at')
+        # Date range filtering
+        created_after = self.request.query_params.get('created_after', None)
+        created_before = self.request.query_params.get('created_before', None)
+
+        if created_after:
+            try:
+                date_after = parse_date(created_after)
+                if date_after:
+                    queryset = queryset.filter(created_at__gte=date_after)
+            except ValueError:
+                pass
+
+        if created_before:
+            try:
+                date_before = parse_date(created_before)
+                if date_before:
+                    queryset = queryset.filter(created_at__lte=date_before)
+            except ValueError:
+                pass
+
+        # Filter by orders with/without items
+        has_items = self.request.query_params.get('has_items', None)
+        if has_items is not None:
+            if has_items.lower() == 'true':
+                queryset = queryset.filter(order_items__isnull=False).distinct()
+            elif has_items.lower() == 'false':
+                queryset = queryset.filter(order_items__isnull=True)
+
+        # Ordering
+        ordering = self.request.query_params.get('ordering', None)
+        if ordering:
+            allowed_fields = ['created_at', 'status', 'order_id', '-created_at', '-status', '-order_id']
+            if ordering in allowed_fields:
+                queryset = queryset.order_by(ordering)
+        else:
+            # Default ordering by creation date (newest first)
+            queryset = queryset.order_by('-created_at')
+
+        # Limit results
+        limit = self.request.query_params.get('limit', None)
+        if limit is not None:
+            try:
+                queryset = queryset[:int(limit)]
+            except ValueError:
+                pass
 
         return queryset
 
@@ -349,11 +768,42 @@ class OrderDetailAPIView(RetrieveAPIView):
 @api_view(['GET'])
 def product_info(request):
     """
-    API view for product information and statistics using ProductInfoSerializer
+    Enhanced API view for product information and statistics with dynamic filtering
     """
+    # Get base queryset
     products = Product.objects.all()
 
-    # Calculate statistics
+    # Apply filters from request
+    search = request.query_params.get('search', None)
+    if search:
+        products = products.filter(
+            Q(name__icontains=search) |
+            Q(description__icontains=search)
+        )
+
+    in_stock = request.query_params.get('in_stock', None)
+    if in_stock is not None:
+        if in_stock.lower() == 'true':
+            products = products.filter(stock__gt=0)
+        elif in_stock.lower() == 'false':
+            products = products.filter(stock=0)
+
+    min_price = request.query_params.get('min_price', None)
+    max_price = request.query_params.get('max_price', None)
+
+    if min_price is not None:
+        try:
+            products = products.filter(price__gte=float(min_price))
+        except ValueError:
+            pass
+
+    if max_price is not None:
+        try:
+            products = products.filter(price__lte=float(max_price))
+        except ValueError:
+            pass
+
+    # Calculate statistics on filtered data
     total_products = products.count()
     in_stock_products = products.filter(stock__gt=0).count()
     out_of_stock_products = total_products - in_stock_products
@@ -361,21 +811,37 @@ def product_info(request):
     # Get price statistics
     price_stats = products.aggregate(
         max_price=Max('price'),
-        avg_price=Avg('price')
+        avg_price=Avg('price'),
+        min_price=Max('price')  # We'll fix this below
     )
 
-    # Get min price
-    min_price = products.order_by('price').first().price if products.exists() else 0
+    # Get actual min price
+    min_price_obj = products.order_by('price').first()
+    min_price_value = min_price_obj.price if min_price_obj else 0
+
+    # Get stock statistics
+    stock_stats = products.aggregate(
+        total_stock=Sum('stock'),
+        avg_stock=Avg('stock')
+    )
 
     # Prepare data for serializer
     data = {
         'products': products,
         'count': total_products,
         'max_price': float(price_stats['max_price']) if price_stats['max_price'] else 0,
-        'min_price': float(min_price),
+        'min_price': float(min_price_value),
         'average_price': float(price_stats['avg_price']) if price_stats['avg_price'] else 0,
         'in_stock_count': in_stock_products,
         'out_of_stock_count': out_of_stock_products,
+        'total_stock': int(stock_stats['total_stock']) if stock_stats['total_stock'] else 0,
+        'average_stock': float(stock_stats['avg_stock']) if stock_stats['avg_stock'] else 0,
+        'filters_applied': {
+            'search': search,
+            'in_stock': in_stock,
+            'min_price': min_price,
+            'max_price': max_price
+        }
     }
 
     serializer = ProductInfoSerializer(data)
