@@ -11,6 +11,8 @@ from .views import (
     ProductListCreateAPIView, ProductCreateAPIView, ProductRetrieveUpdateDestroyAPIView,
     UserListCreateAPIView, OrderListCreateAPIView, OrderItemListCreateAPIView,
     ProductCreateOnlyAPIView, OrderCreateOnlyAPIView,
+    # JWT Authentication Views
+    CustomTokenObtainPairView, UserRegistrationView,
     # Simple function-based view
     product_info
 )
@@ -24,6 +26,10 @@ router.register(r'order-items', OrderItemViewSet)
 
 # The API URLs are now determined automatically by the router
 urlpatterns = [
+    # JWT Authentication URLs
+    path('auth/login/', CustomTokenObtainPairView.as_view(), name='auth-login'),
+    path('auth/register/', UserRegistrationView.as_view(), name='auth-register'),
+
     # ViewSet URLs (Full CRUD functionality)
     path('', include(router.urls)),
 

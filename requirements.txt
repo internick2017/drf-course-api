@@ -2,6 +2,7 @@ asgiref
 Django
 django-extensions
 djangorestframework
+djangorestframework-simplejwt
 django-silk
 pillow
 sqlparse

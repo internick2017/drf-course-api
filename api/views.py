@@ -1,4 +1,4 @@
-from rest_framework import viewsets
+from rest_framework import viewsets, generics, status, permissions
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
@@ -18,6 +18,87 @@ from .permissions import (
     IsOrderOwner, IsOrderItemOwner,
     IsAdminOrReadOnly, IsAuthenticatedOrReadOnlyForProducts
 )
+from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
+
+
+# JWT Authentication Views
+class CustomTokenObtainPairView(TokenObtainPairView):
+    """
+    Custom token obtain view with better error handling and response format
+    """
+    def post(self, request, *args, **kwargs):
+        try:
+            response = super().post(request, *args, **kwargs)
+            response.data['message'] = 'Login successful'
+            return response
+        except InvalidToken as e:
+            return Response({
+                'error': 'Invalid credentials',
+                'detail': str(e)
+            }, status=status.HTTP_401_UNAUTHORIZED)
+        except TokenError as e:
+            return Response({
+                'error': 'Token error',
+                'detail': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response({
+                'error': 'Authentication failed',
+                'detail': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class UserRegistrationView(generics.CreateAPIView):
+    """
+    User registration view with JWT token response
+    """
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
+    permission_classes = [permissions.AllowAny]
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            # Validate password
+            password = request.data.get('password')
+            if password:
+                try:
+                    validate_password(password)
+                except ValidationError as e:
+                    return Response({
+                        'error': 'Password validation failed',
+                        'detail': e.messages
+                    }, status=status.HTTP_400_BAD_REQUEST)
+
+            # Create user
+            user = serializer.save()
+            user.set_password(password)
+            user.save()
+
+            # Generate JWT tokens
+            refresh = RefreshToken.for_user(user)
+
+            return Response({
+                'message': 'User registered successfully',
+                'user': {
+                    'id': user.id,
+                    'username': user.username,
+                    'email': user.email,
+                    'is_staff': user.is_staff
+                },
+                'tokens': {
+                    'access': str(refresh.access_token),
+                    'refresh': str(refresh)
+                }
+            }, status=status.HTTP_201_CREATED)
+
+        return Response({
+            'error': 'Registration failed',
+            'detail': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
 
 
 class UserViewSet(viewsets.ModelViewSet):
