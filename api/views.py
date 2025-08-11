@@ -15,13 +15,17 @@ import random
 from silk.profiling.profiler import silk_profile
 from .models import User, Product, Order, OrderItem
 from .serializers import UserSerializer, ProductSerializer, OrderSerializer, OrderItemSerializer, ProductInfoSerializer
+from .permissions import (
+    IsProductOwnerOrReadOnly, IsOrderOwner, IsOrderItemOwner,
+    IsAdminOrReadOnly, IsOwnerOrAdmin, IsAuthenticatedOrReadOnlyForProducts
+)
 
 
 class UserViewSet(viewsets.ModelViewSet):
     """ViewSet for User model with dynamic filtering"""
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminOrReadOnly]  # Only admins can manage users
 
     def get_queryset(self):
         """
@@ -89,7 +93,7 @@ class ProductViewSet(viewsets.ModelViewSet):
     """ViewSet for Product model with dynamic filtering"""
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAuthenticatedOrReadOnlyForProducts]  # Read for everyone, write for authenticated
 
     def get_queryset(self):
         """
@@ -167,13 +171,14 @@ class OrderViewSet(viewsets.ModelViewSet):
     """ViewSet for Order model with dynamic filtering"""
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsOrderOwner]  # Users can only access their own orders
 
     def get_queryset(self):
         """
         Dynamic filtering for Order ViewSet with user-specific access
         """
-        queryset = Order.objects.prefetch_related('order_items__product').filter(user=self.request.user)
+        # Use prefetch_related for optimized queries
+        queryset = Order.objects.prefetch_related('items__product').filter(user=self.request.user)
 
         # Status filtering
         status = self.request.query_params.get('status', None)
@@ -204,9 +209,9 @@ class OrderViewSet(viewsets.ModelViewSet):
         has_items = self.request.query_params.get('has_items', None)
         if has_items is not None:
             if has_items.lower() == 'true':
-                queryset = queryset.filter(order_items__isnull=False).distinct()
+                queryset = queryset.filter(items__isnull=False).distinct()
             elif has_items.lower() == 'false':
-                queryset = queryset.filter(order_items__isnull=True)
+                queryset = queryset.filter(items__isnull=True)
 
         # Ordering
         ordering = self.request.query_params.get('ordering', None)
@@ -233,8 +238,8 @@ class OrderViewSet(viewsets.ModelViewSet):
             'pending_orders': user_orders.filter(status='Pending').count(),
             'confirmed_orders': user_orders.filter(status='Confirmed').count(),
             'cancelled_orders': user_orders.filter(status='Cancelled').count(),
-            'orders_with_items': user_orders.filter(order_items__isnull=False).distinct().count(),
-            'orders_without_items': user_orders.filter(order_items__isnull=True).count(),
+            'orders_with_items': user_orders.filter(items__isnull=False).distinct().count(),
+            'orders_without_items': user_orders.filter(items__isnull=True).count(),
         }
 
         return Response(stats)
@@ -244,7 +249,7 @@ class OrderItemViewSet(viewsets.ModelViewSet):
     """ViewSet for OrderItem model with dynamic filtering"""
     queryset = OrderItem.objects.all()
     serializer_class = OrderItemSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsOrderItemOwner]  # Users can only access their own order items
 
     def get_queryset(self):
         """
@@ -457,7 +462,7 @@ class ProductListAPIView(ListAPIView):
     """
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAuthenticatedOrReadOnlyForProducts]  # Read for everyone, write for authenticated
 
     def get_queryset(self):
         """
@@ -546,7 +551,7 @@ class ProductDetailAPIView(RetrieveAPIView):
     """
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
-    permission_classes = [IsAuthenticatedOrReadOnly]
+    permission_classes = [IsAuthenticatedOrReadOnlyForProducts]  # Read for everyone, write for authenticated
     lookup_field = 'id'  # Default is 'pk', but we can specify any field
     lookup_url_kwarg = 'product_id'  # Match URL parameter name
 
@@ -576,7 +581,7 @@ class UserListAPIView(ListAPIView):
     - limit: Limit number of results
     """
     serializer_class = UserSerializer
-    permission_classes = [IsAuthenticated]  # Only authenticated users can view user list
+    permission_classes = [IsAdminOrReadOnly]  # Only admins can view user list
 
     def get_queryset(self):
         """
@@ -659,7 +664,7 @@ class UserDetailAPIView(RetrieveAPIView):
     """
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAdminOrReadOnly]  # Only admins can view user details
     lookup_field = 'username'  # Use username instead of ID for lookup
 
     def get_object(self):
@@ -687,14 +692,14 @@ class OrderListAPIView(ListAPIView):
     - limit: Limit number of results
     """
     serializer_class = OrderSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsOrderOwner]  # Users can only access their own orders
 
     def get_queryset(self):
         """
         Advanced dynamic filtering for orders with optimized queries
         """
         # Use prefetch_related for optimized queries
-        queryset = Order.objects.prefetch_related('order_items__product').filter(user=self.request.user)
+        queryset = Order.objects.prefetch_related('items__product').filter(user=self.request.user)
 
         # Status filtering
         status = self.request.query_params.get('status', None)
@@ -725,9 +730,9 @@ class OrderListAPIView(ListAPIView):
         has_items = self.request.query_params.get('has_items', None)
         if has_items is not None:
             if has_items.lower() == 'true':
-                queryset = queryset.filter(order_items__isnull=False).distinct()
+                queryset = queryset.filter(items__isnull=False).distinct()
             elif has_items.lower() == 'false':
-                queryset = queryset.filter(order_items__isnull=True)
+                queryset = queryset.filter(items__isnull=True)
 
         # Ordering
         ordering = self.request.query_params.get('ordering', None)
@@ -755,7 +760,7 @@ class OrderDetailAPIView(RetrieveAPIView):
     Generic view for retrieving a single order
     """
     serializer_class = OrderSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsOrderOwner]  # Users can only access their own orders
 
     def get_queryset(self):
         """

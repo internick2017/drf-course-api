@@ -62,20 +62,26 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
 
 class OrderSerializer(serializers.ModelSerializer):
-    """Serializer for Order model with items and total calculation"""
-    items = OrderItemSerializer(many=True, read_only=True, source='order_items')
+    """Serializer for Order model with calculated total price"""
+    items = OrderItemSerializer(many=True, read_only=True)
     total_price = serializers.SerializerMethodField(method_name='calculate_total')
-    user_username = serializers.CharField(source='user.username', read_only=True)
 
     def calculate_total(self, obj):
-        """Calculate total price of the order"""
-        order_items = obj.order_items.all()
+        """Calculate total price for the order"""
+        order_items = obj.items.all()
         return sum(order_item.item_subtotal for order_item in order_items)
 
     class Meta:
         model = Order
-        fields = ['order_id', 'user', 'user_username', 'created_at', 'status', 'items', 'total_price']
-        read_only_fields = ['order_id', 'created_at', 'items', 'user_username', 'total_price']
+        fields = (
+            'order_id',
+            'created_at',
+            'user',
+            'status',
+            'items',
+            'total_price',
+        )
+        read_only_fields = ['order_id', 'created_at', 'items', 'total_price']
 
 
 class ProductInfoSerializer(serializers.Serializer):
