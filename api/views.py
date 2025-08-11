@@ -3,7 +3,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.generics import ListAPIView, RetrieveAPIView
+from rest_framework.generics import (
+    ListAPIView, RetrieveAPIView, ListCreateAPIView,
+    CreateAPIView, RetrieveUpdateDestroyAPIView
+)
 from django.db.models import Max, Avg, Q, Sum
 from django.utils.dateparse import parse_date
 import time
@@ -494,6 +497,537 @@ class PerformanceTestView(APIView):
                 },
                 'comparison_note': 'Compare the number of SQL queries in Silk dashboard'
             })
+
+
+# Enhanced Generic Views for List and Create Operations
+
+class ProductListCreateAPIView(ListCreateAPIView):
+    """
+    Generic view for listing and creating products
+
+    GET: List all products with advanced filtering
+    POST: Create a new product (Admin only)
+
+    Available filters for GET:
+    - search: Search in name and description
+    - in_stock: true/false for stock availability
+    - min_price, max_price: Price range filtering
+    - min_stock, max_stock: Stock range filtering
+    - ordering: Sort by any field (name, price, stock, id)
+    - limit: Limit number of results
+
+    POST data format:
+    {
+        "name": "Product Name",
+        "description": "Product description",
+        "price": "99.99",
+        "stock": 10,
+        "image": "image_file" (optional)
+    }
+    """
+    queryset = Product.objects.all()
+    serializer_class = ProductSerializer
+    permission_classes = [IsAdminOrReadOnly]
+
+    def get_queryset(self):
+        """Apply advanced filtering for product listing"""
+        queryset = Product.objects.all()
+        queryset = self._apply_search_filter(queryset)
+        queryset = self._apply_stock_availability_filter(queryset)
+        queryset = self._apply_price_range_filters(queryset)
+        queryset = self._apply_stock_range_filters(queryset)
+        queryset = self._apply_ordering(queryset)
+        queryset = self._apply_limit(queryset)
+        return queryset
+
+    def _apply_search_filter(self, queryset):
+        """Apply search filter to queryset"""
+        search = self.request.query_params.get('search', None)
+        if search:
+            queryset = queryset.filter(
+                Q(name__icontains=search) |
+                Q(description__icontains=search)
+            )
+        return queryset
+
+    def _apply_stock_availability_filter(self, queryset):
+        """Apply stock availability filter to queryset"""
+        in_stock = self.request.query_params.get('in_stock', None)
+        if in_stock is not None:
+            if in_stock.lower() == 'true':
+                queryset = queryset.filter(stock__gt=0)
+            elif in_stock.lower() == 'false':
+                queryset = queryset.filter(stock=0)
+        return queryset
+
+    def _apply_price_range_filters(self, queryset):
+        """Apply price range filters to queryset"""
+        min_price = self.request.query_params.get('min_price', None)
+        max_price = self.request.query_params.get('max_price', None)
+
+        if min_price is not None:
+            try:
+                queryset = queryset.filter(price__gte=float(min_price))
+            except ValueError:
+                pass
+
+        if max_price is not None:
+            try:
+                queryset = queryset.filter(price__lte=float(max_price))
+            except ValueError:
+                pass
+        return queryset
+
+    def _apply_stock_range_filters(self, queryset):
+        """Apply stock range filters to queryset"""
+        min_stock = self.request.query_params.get('min_stock', None)
+        max_stock = self.request.query_params.get('max_stock', None)
+
+        if min_stock is not None:
+            try:
+                queryset = queryset.filter(stock__gte=int(min_stock))
+            except ValueError:
+                pass
+
+        if max_stock is not None:
+            try:
+                queryset = queryset.filter(stock__lte=int(max_stock))
+            except ValueError:
+                pass
+        return queryset
+
+    def _apply_ordering(self, queryset):
+        """Apply ordering to queryset"""
+        ordering = self.request.query_params.get('ordering', None)
+        if ordering:
+            allowed_fields = ['name', 'price', 'stock', 'id', '-name', '-price', '-stock', '-id']
+            if ordering in allowed_fields:
+                queryset = queryset.order_by(ordering)
+        else:
+            queryset = queryset.order_by('name')
+        return queryset
+
+    def _apply_limit(self, queryset):
+        """Apply limit to queryset"""
+        limit = self.request.query_params.get('limit', None)
+        if limit is not None:
+            try:
+                queryset = queryset[:int(limit)]
+            except ValueError:
+                pass
+        return queryset
+
+    def perform_create(self, serializer):
+        """Custom logic when creating a product"""
+        product = serializer.save()
+        print(f"New product created: {product.name} with price ${product.price}")
+
+
+class ProductCreateAPIView(CreateAPIView):
+    """
+    Generic view for creating products only (POST only) - Admin only
+
+    POST data format:
+    {
+        "name": "Product Name",
+        "description": "Product description",
+        "price": "99.99",
+        "stock": 10,
+        "image": "image_file" (optional)
+    }
+    """
+    queryset = Product.objects.all()
+    serializer_class = ProductSerializer
+    permission_classes = [IsAdminOrReadOnly]
+
+    def perform_create(self, serializer):
+        """Custom logic when creating a product"""
+        product = serializer.save()
+        print(f"Product created via CreateAPIView: {product.name}")
+
+
+class ProductRetrieveUpdateDestroyAPIView(RetrieveUpdateDestroyAPIView):
+    """
+    Generic view for retrieving, updating, and deleting a single product
+
+    GET: Retrieve product details
+    PUT/PATCH: Update product (Admin only)
+    DELETE: Delete product (Admin only)
+
+    Available URL parameters:
+    - pk: Product ID
+    """
+    queryset = Product.objects.all()
+    serializer_class = ProductSerializer
+    permission_classes = [IsAdminOrReadOnly]
+    lookup_field = 'id'
+
+    def perform_update(self, serializer):
+        """Custom logic when updating a product"""
+        product = serializer.save()
+        print(f"Product updated: {product.name}")
+
+    def perform_destroy(self, instance):
+        """Custom logic when deleting a product"""
+        print(f"Product deleted: {instance.name}")
+        instance.delete()
+
+
+class UserListCreateAPIView(ListCreateAPIView):
+    """
+    Generic view for listing and creating users (Admin only)
+
+    GET: List all users with advanced filtering
+    POST: Create a new user
+
+    Available filters for GET:
+    - search: Search in username, first_name, last_name, email
+    - username: Exact username match
+    - email_domain: Filter by email domain
+    - is_active: Filter by active status
+    - date_joined_after, date_joined_before: Date range filtering
+    - ordering: Sort by any field
+    - limit: Limit number of results
+
+    POST data format:
+    {
+        "username": "newuser",
+        "email": "user@example.com",
+        "first_name": "John",
+        "last_name": "Doe",
+        "password": "securepassword"
+    }
+    """
+    serializer_class = UserSerializer
+    permission_classes = [IsAdminOrReadOnly]
+
+    def get_queryset(self):
+        """Apply advanced filtering for user listing"""
+        queryset = User.objects.all()
+        queryset = self._apply_search_filter(queryset)
+        queryset = self._apply_username_filter(queryset)
+        queryset = self._apply_email_domain_filter(queryset)
+        queryset = self._apply_active_status_filter(queryset)
+        queryset = self._apply_date_range_filters(queryset)
+        queryset = self._apply_ordering(queryset)
+        queryset = self._apply_limit(queryset)
+        return queryset
+
+    def _apply_search_filter(self, queryset):
+        """Apply search filter to queryset"""
+        search = self.request.query_params.get('search', None)
+        if search:
+            queryset = queryset.filter(
+                Q(username__icontains=search) |
+                Q(first_name__icontains=search) |
+                Q(last_name__icontains=search) |
+                Q(email__icontains=search)
+            )
+        return queryset
+
+    def _apply_username_filter(self, queryset):
+        """Apply username filter to queryset"""
+        username = self.request.query_params.get('username', None)
+        if username:
+            queryset = queryset.filter(username__icontains=username)
+        return queryset
+
+    def _apply_email_domain_filter(self, queryset):
+        """Apply email domain filter to queryset"""
+        email_domain = self.request.query_params.get('email_domain', None)
+        if email_domain:
+            queryset = queryset.filter(email__endswith=f'@{email_domain}')
+        return queryset
+
+    def _apply_active_status_filter(self, queryset):
+        """Apply active status filter to queryset"""
+        is_active = self.request.query_params.get('is_active', None)
+        if is_active is not None:
+            if is_active.lower() == 'true':
+                queryset = queryset.filter(is_active=True)
+            elif is_active.lower() == 'false':
+                queryset = queryset.filter(is_active=False)
+        return queryset
+
+    def _apply_date_range_filters(self, queryset):
+        """Apply date range filters to queryset"""
+        date_joined_after = self.request.query_params.get('date_joined_after', None)
+        date_joined_before = self.request.query_params.get('date_joined_before', None)
+
+        if date_joined_after:
+            try:
+                date_after = parse_date(date_joined_after)
+                if date_after:
+                    queryset = queryset.filter(date_joined__gte=date_after)
+            except ValueError:
+                pass
+
+        if date_joined_before:
+            try:
+                date_before = parse_date(date_joined_before)
+                if date_before:
+                    queryset = queryset.filter(date_joined__lte=date_before)
+            except ValueError:
+                pass
+        return queryset
+
+    def _apply_ordering(self, queryset):
+        """Apply ordering to queryset"""
+        ordering = self.request.query_params.get('ordering', None)
+        if ordering:
+            allowed_fields = ['username', 'email', 'first_name', 'last_name', 'date_joined',
+                            '-username', '-email', '-first_name', '-last_name', '-date_joined']
+            if ordering in allowed_fields:
+                queryset = queryset.order_by(ordering)
+        else:
+            queryset = queryset.order_by('username')
+        return queryset
+
+    def _apply_limit(self, queryset):
+        """Apply limit to queryset"""
+        limit = self.request.query_params.get('limit', None)
+        if limit is not None:
+            try:
+                queryset = queryset[:int(limit)]
+            except ValueError:
+                pass
+        return queryset
+
+    def perform_create(self, serializer):
+        """Custom logic when creating a user"""
+        user = serializer.save()
+        print(f"New user created: {user.username}")
+
+
+class OrderListCreateAPIView(ListCreateAPIView):
+    """
+    Generic view for listing and creating orders
+
+    GET: List user's orders with advanced filtering
+    POST: Create a new order for the current user (Admin only)
+
+    Available filters for GET:
+    - status: Filter by order status (Pending, Confirmed, Cancelled)
+    - created_after, created_before: Date range filtering
+    - has_items: Filter orders with/without items
+    - ordering: Sort by any field
+    - limit: Limit number of results
+
+    POST data format:
+    {
+        "status": "Pending" (optional, defaults to "Pending")
+    }
+    """
+    serializer_class = OrderSerializer
+    permission_classes = [IsAdminOrReadOnly]
+
+    def get_queryset(self):
+        """Apply advanced filtering for order listing"""
+        # Admins can see all orders, regular users see only their own
+        if self.request.user.is_staff:
+            queryset = Order.objects.prefetch_related('items__product').all()
+        else:
+            queryset = Order.objects.prefetch_related('items__product').filter(user=self.request.user)
+
+        queryset = self._apply_status_filter(queryset)
+        queryset = self._apply_date_range_filters(queryset)
+        queryset = self._apply_items_filter(queryset)
+        queryset = self._apply_ordering(queryset)
+        queryset = self._apply_limit(queryset)
+        return queryset
+
+    def _apply_status_filter(self, queryset):
+        """Apply status filter to queryset"""
+        status = self.request.query_params.get('status', None)
+        if status:
+            queryset = queryset.filter(status=status)
+        return queryset
+
+    def _apply_date_range_filters(self, queryset):
+        """Apply date range filters to queryset"""
+        created_after = self.request.query_params.get('created_after', None)
+        created_before = self.request.query_params.get('created_before', None)
+
+        if created_after:
+            try:
+                date_after = parse_date(created_after)
+                if date_after:
+                    queryset = queryset.filter(created_at__gte=date_after)
+            except ValueError:
+                pass
+
+        if created_before:
+            try:
+                date_before = parse_date(created_before)
+                if date_before:
+                    queryset = queryset.filter(created_at__lte=date_before)
+            except ValueError:
+                pass
+        return queryset
+
+    def _apply_items_filter(self, queryset):
+        """Apply items filter to queryset"""
+        has_items = self.request.query_params.get('has_items', None)
+        if has_items is not None:
+            if has_items.lower() == 'true':
+                queryset = queryset.filter(items__isnull=False).distinct()
+            elif has_items.lower() == 'false':
+                queryset = queryset.filter(items__isnull=True)
+        return queryset
+
+    def _apply_ordering(self, queryset):
+        """Apply ordering to queryset"""
+        ordering = self.request.query_params.get('ordering', None)
+        if ordering:
+            allowed_fields = ['created_at', 'status', 'order_id', '-created_at', '-status', '-order_id']
+            if ordering in allowed_fields:
+                queryset = queryset.order_by(ordering)
+        else:
+            queryset = queryset.order_by('-created_at')
+        return queryset
+
+    def _apply_limit(self, queryset):
+        """Apply limit to queryset"""
+        limit = self.request.query_params.get('limit', None)
+        if limit is not None:
+            try:
+                queryset = queryset[:int(limit)]
+            except ValueError:
+                pass
+        return queryset
+
+    def perform_create(self, serializer):
+        """Set the user to the current user when creating an order"""
+        order = serializer.save(user=self.request.user)
+        print(f"New order created: {order.order_id} for user {self.request.user.username}")
+
+
+class OrderItemListCreateAPIView(ListCreateAPIView):
+    """
+    Generic view for listing and creating order items
+
+    GET: List order items with advanced filtering
+    POST: Create a new order item (Admin only)
+
+    Available filters for GET:
+    - order_id: Filter by order ID
+    - product_id: Filter by product ID
+    - min_quantity, max_quantity: Quantity range filtering
+    - ordering: Sort by any field
+    - limit: Limit number of results
+
+    POST data format:
+    {
+        "order": "order_uuid",
+        "product": "product_id",
+        "quantity": 2
+    }
+    """
+    serializer_class = OrderItemSerializer
+    permission_classes = [IsAdminOrReadOnly]
+
+    def get_queryset(self):
+        """Apply advanced filtering for order item listing"""
+        # Admins can see all order items, regular users see only their own
+        if self.request.user.is_staff:
+            queryset = OrderItem.objects.select_related('order', 'product').all()
+        else:
+            queryset = OrderItem.objects.select_related('order', 'product').filter(order__user=self.request.user)
+
+        queryset = self._apply_order_filter(queryset)
+        queryset = self._apply_product_filter(queryset)
+        queryset = self._apply_quantity_range_filters(queryset)
+        queryset = self._apply_ordering(queryset)
+        queryset = self._apply_limit(queryset)
+        return queryset
+
+    def _apply_order_filter(self, queryset):
+        """Apply order filter to queryset"""
+        order_id = self.request.query_params.get('order_id', None)
+        if order_id:
+            queryset = queryset.filter(order__order_id=order_id)
+        return queryset
+
+    def _apply_product_filter(self, queryset):
+        """Apply product filter to queryset"""
+        product_id = self.request.query_params.get('product_id', None)
+        if product_id:
+            queryset = queryset.filter(product__id=product_id)
+        return queryset
+
+    def _apply_quantity_range_filters(self, queryset):
+        """Apply quantity range filters to queryset"""
+        min_quantity = self.request.query_params.get('min_quantity', None)
+        max_quantity = self.request.query_params.get('max_quantity', None)
+
+        if min_quantity is not None:
+            try:
+                queryset = queryset.filter(quantity__gte=int(min_quantity))
+            except ValueError:
+                pass
+
+        if max_quantity is not None:
+            try:
+                queryset = queryset.filter(quantity__lte=int(max_quantity))
+            except ValueError:
+                pass
+        return queryset
+
+    def _apply_ordering(self, queryset):
+        """Apply ordering to queryset"""
+        ordering = self.request.query_params.get('ordering', None)
+        if ordering:
+            allowed_fields = ['quantity', 'product__name', 'order__created_at',
+                            '-quantity', '-product__name', '-order__created_at']
+            if ordering in allowed_fields:
+                queryset = queryset.order_by(ordering)
+        else:
+            queryset = queryset.order_by('-order__created_at')
+        return queryset
+
+    def _apply_limit(self, queryset):
+        """Apply limit to queryset"""
+        limit = self.request.query_params.get('limit', None)
+        if limit is not None:
+            try:
+                queryset = queryset[:int(limit)]
+            except ValueError:
+                pass
+        return queryset
+
+    def perform_create(self, serializer):
+        """Custom logic when creating an order item"""
+        order_item = serializer.save()
+        print(f"New order item created: {order_item.quantity}x {order_item.product.name}")
+
+
+# Simple Create-only views for specific use cases
+
+class ProductCreateOnlyAPIView(CreateAPIView):
+    """
+    Create-only view for products (useful for forms or specific workflows) - Admin only
+    """
+    queryset = Product.objects.all()
+    serializer_class = ProductSerializer
+    permission_classes = [IsAdminOrReadOnly]
+
+    def perform_create(self, serializer):
+        """Custom logic when creating a product"""
+        product = serializer.save()
+        print(f"Product created via CreateOnly view: {product.name}")
+
+
+class OrderCreateOnlyAPIView(CreateAPIView):
+    """
+    Create-only view for orders (useful for checkout process) - Admin only
+    """
+    serializer_class = OrderSerializer
+    permission_classes = [IsAdminOrReadOnly]
+
+    def perform_create(self, serializer):
+        """Set the user to the current user when creating an order"""
+        order = serializer.save(user=self.request.user)
+        print(f"Order created via CreateOnly view: {order.order_id}")
 
 
 # Generic Views Examples - ListAPIView & RetrieveAPIView
