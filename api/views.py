@@ -1,23 +1,19 @@
 from rest_framework import viewsets
-from rest_framework.permissions import IsAuthenticatedOrReadOnly, IsAuthenticated
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.generics import ListAPIView, RetrieveAPIView
-from django.db import connection
-from django.http import JsonResponse
-from django.db.models import Max, Avg, Q, Count, Sum
-from django.shortcuts import get_object_or_404
+from django.db.models import Max, Avg, Q, Sum
 from django.utils.dateparse import parse_date
-from datetime import datetime, timedelta
 import time
 import random
 from silk.profiling.profiler import silk_profile
 from .models import User, Product, Order, OrderItem
 from .serializers import UserSerializer, ProductSerializer, OrderSerializer, OrderItemSerializer, ProductInfoSerializer
 from .permissions import (
-    IsProductOwnerOrReadOnly, IsOrderOwner, IsOrderItemOwner,
-    IsAdminOrReadOnly, IsOwnerOrAdmin, IsAuthenticatedOrReadOnlyForProducts
+    IsOrderOwner, IsOrderItemOwner,
+    IsAdminOrReadOnly, IsAuthenticatedOrReadOnlyForProducts
 )
 
 
@@ -32,8 +28,15 @@ class UserViewSet(viewsets.ModelViewSet):
         Dynamic filtering for User ViewSet
         """
         queryset = User.objects.all()
+        queryset = self._apply_search_filter(queryset)
+        queryset = self._apply_email_domain_filter(queryset)
+        queryset = self._apply_active_status_filter(queryset)
+        queryset = self._apply_date_range_filters(queryset)
+        queryset = self._apply_ordering(queryset)
+        return queryset
 
-        # Search functionality
+    def _apply_search_filter(self, queryset):
+        """Apply search filter to queryset"""
         search = self.request.query_params.get('search', None)
         if search:
             queryset = queryset.filter(
@@ -42,21 +45,27 @@ class UserViewSet(viewsets.ModelViewSet):
                 Q(last_name__icontains=search) |
                 Q(email__icontains=search)
             )
+        return queryset
 
-        # Email domain filtering
+    def _apply_email_domain_filter(self, queryset):
+        """Apply email domain filter to queryset"""
         email_domain = self.request.query_params.get('email_domain', None)
         if email_domain:
             queryset = queryset.filter(email__endswith=f'@{email_domain}')
+        return queryset
 
-        # Active status filtering
+    def _apply_active_status_filter(self, queryset):
+        """Apply active status filter to queryset"""
         is_active = self.request.query_params.get('is_active', None)
         if is_active is not None:
             if is_active.lower() == 'true':
                 queryset = queryset.filter(is_active=True)
             elif is_active.lower() == 'false':
                 queryset = queryset.filter(is_active=False)
+        return queryset
 
-        # Date range filtering
+    def _apply_date_range_filters(self, queryset):
+        """Apply date range filters to queryset"""
         date_joined_after = self.request.query_params.get('date_joined_after', None)
         date_joined_before = self.request.query_params.get('date_joined_before', None)
 
@@ -76,7 +85,10 @@ class UserViewSet(viewsets.ModelViewSet):
             except ValueError:
                 pass
 
-        # Ordering
+        return queryset
+
+    def _apply_ordering(self, queryset):
+        """Apply ordering to queryset"""
         ordering = self.request.query_params.get('ordering', None)
         if ordering:
             allowed_fields = ['username', 'email', 'first_name', 'last_name', 'date_joined',
@@ -85,7 +97,6 @@ class UserViewSet(viewsets.ModelViewSet):
                 queryset = queryset.order_by(ordering)
         else:
             queryset = queryset.order_by('username')
-
         return queryset
 
 
@@ -100,24 +111,35 @@ class ProductViewSet(viewsets.ModelViewSet):
         Dynamic filtering for Product ViewSet
         """
         queryset = Product.objects.all()
+        queryset = self._apply_search_filter(queryset)
+        queryset = self._apply_stock_availability_filter(queryset)
+        queryset = self._apply_price_range_filters(queryset)
+        queryset = self._apply_stock_range_filters(queryset)
+        queryset = self._apply_ordering(queryset)
+        return queryset
 
-        # Search functionality
+    def _apply_search_filter(self, queryset):
+        """Apply search filter to queryset"""
         search = self.request.query_params.get('search', None)
         if search:
             queryset = queryset.filter(
                 Q(name__icontains=search) |
                 Q(description__icontains=search)
             )
+        return queryset
 
-        # Stock availability filtering
+    def _apply_stock_availability_filter(self, queryset):
+        """Apply stock availability filter to queryset"""
         in_stock = self.request.query_params.get('in_stock', None)
         if in_stock is not None:
             if in_stock.lower() == 'true':
                 queryset = queryset.filter(stock__gt=0)
             elif in_stock.lower() == 'false':
                 queryset = queryset.filter(stock=0)
+        return queryset
 
-        # Price range filtering
+    def _apply_price_range_filters(self, queryset):
+        """Apply price range filters to queryset"""
         min_price = self.request.query_params.get('min_price', None)
         max_price = self.request.query_params.get('max_price', None)
 
@@ -132,8 +154,10 @@ class ProductViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(price__lte=float(max_price))
             except ValueError:
                 pass
+        return queryset
 
-        # Stock range filtering
+    def _apply_stock_range_filters(self, queryset):
+        """Apply stock range filters to queryset"""
         min_stock = self.request.query_params.get('min_stock', None)
         max_stock = self.request.query_params.get('max_stock', None)
 
@@ -148,8 +172,10 @@ class ProductViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(stock__lte=int(max_stock))
             except ValueError:
                 pass
+        return queryset
 
-        # Ordering
+    def _apply_ordering(self, queryset):
+        """Apply ordering to queryset"""
         ordering = self.request.query_params.get('ordering', None)
         if ordering:
             allowed_fields = ['name', 'price', 'stock', 'id', '-name', '-price', '-stock', '-id']
@@ -157,7 +183,6 @@ class ProductViewSet(viewsets.ModelViewSet):
                 queryset = queryset.order_by(ordering)
         else:
             queryset = queryset.order_by('name')
-
         return queryset
 
     @action(detail=True, methods=['get'])
@@ -179,13 +204,21 @@ class OrderViewSet(viewsets.ModelViewSet):
         """
         # Use prefetch_related for optimized queries
         queryset = Order.objects.prefetch_related('items__product').filter(user=self.request.user)
+        queryset = self._apply_status_filter(queryset)
+        queryset = self._apply_date_range_filters(queryset)
+        queryset = self._apply_items_filter(queryset)
+        queryset = self._apply_ordering(queryset)
+        return queryset
 
-        # Status filtering
+    def _apply_status_filter(self, queryset):
+        """Apply status filter to queryset"""
         status = self.request.query_params.get('status', None)
         if status:
             queryset = queryset.filter(status=status)
+        return queryset
 
-        # Date range filtering
+    def _apply_date_range_filters(self, queryset):
+        """Apply date range filters to queryset"""
         created_after = self.request.query_params.get('created_after', None)
         created_before = self.request.query_params.get('created_before', None)
 
@@ -204,16 +237,20 @@ class OrderViewSet(viewsets.ModelViewSet):
                     queryset = queryset.filter(created_at__lte=date_before)
             except ValueError:
                 pass
+        return queryset
 
-        # Filter by orders with/without items
+    def _apply_items_filter(self, queryset):
+        """Apply items filter to queryset"""
         has_items = self.request.query_params.get('has_items', None)
         if has_items is not None:
             if has_items.lower() == 'true':
                 queryset = queryset.filter(items__isnull=False).distinct()
             elif has_items.lower() == 'false':
                 queryset = queryset.filter(items__isnull=True)
+        return queryset
 
-        # Ordering
+    def _apply_ordering(self, queryset):
+        """Apply ordering to queryset"""
         ordering = self.request.query_params.get('ordering', None)
         if ordering:
             allowed_fields = ['created_at', 'status', 'order_id', '-created_at', '-status', '-order_id']
@@ -221,7 +258,6 @@ class OrderViewSet(viewsets.ModelViewSet):
                 queryset = queryset.order_by(ordering)
         else:
             queryset = queryset.order_by('-created_at')
-
         return queryset
 
     def perform_create(self, serializer):
@@ -256,18 +292,29 @@ class OrderItemViewSet(viewsets.ModelViewSet):
         Dynamic filtering for OrderItem ViewSet
         """
         queryset = OrderItem.objects.select_related('order', 'product')
+        queryset = self._apply_order_filter(queryset)
+        queryset = self._apply_product_filter(queryset)
+        queryset = self._apply_quantity_range_filters(queryset)
+        queryset = self._apply_subtotal_range_filters(queryset)
+        queryset = self._apply_ordering(queryset)
+        return queryset
 
-        # Filter by order
+    def _apply_order_filter(self, queryset):
+        """Apply order filter to queryset"""
         order_id = self.request.query_params.get('order_id', None)
         if order_id:
             queryset = queryset.filter(order__order_id=order_id)
+        return queryset
 
-        # Filter by product
+    def _apply_product_filter(self, queryset):
+        """Apply product filter to queryset"""
         product_id = self.request.query_params.get('product_id', None)
         if product_id:
             queryset = queryset.filter(product__id=product_id)
+        return queryset
 
-        # Quantity range filtering
+    def _apply_quantity_range_filters(self, queryset):
+        """Apply quantity range filters to queryset"""
         min_quantity = self.request.query_params.get('min_quantity', None)
         max_quantity = self.request.query_params.get('max_quantity', None)
 
@@ -282,8 +329,10 @@ class OrderItemViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(quantity__lte=int(max_quantity))
             except ValueError:
                 pass
+        return queryset
 
-        # Filter by subtotal range
+    def _apply_subtotal_range_filters(self, queryset):
+        """Apply subtotal range filters to queryset"""
         min_subtotal = self.request.query_params.get('min_subtotal', None)
         max_subtotal = self.request.query_params.get('max_subtotal', None)
 
@@ -298,8 +347,10 @@ class OrderItemViewSet(viewsets.ModelViewSet):
                 queryset = queryset.filter(product__price__lte=float(max_subtotal))
             except ValueError:
                 pass
+        return queryset
 
-        # Ordering
+    def _apply_ordering(self, queryset):
+        """Apply ordering to queryset"""
         ordering = self.request.query_params.get('ordering', None)
         if ordering:
             allowed_fields = ['quantity', 'product__name', 'order__created_at',
@@ -308,7 +359,6 @@ class OrderItemViewSet(viewsets.ModelViewSet):
                 queryset = queryset.order_by(ordering)
         else:
             queryset = queryset.order_by('-order__created_at')
-
         return queryset
 
 
@@ -469,24 +519,36 @@ class ProductListAPIView(ListAPIView):
         Advanced dynamic filtering for products
         """
         queryset = Product.objects.all()
+        queryset = self._apply_search_filter(queryset)
+        queryset = self._apply_stock_availability_filter(queryset)
+        queryset = self._apply_price_range_filters(queryset)
+        queryset = self._apply_stock_range_filters(queryset)
+        queryset = self._apply_ordering(queryset)
+        queryset = self._apply_limit(queryset)
+        return queryset
 
-        # Search functionality
+    def _apply_search_filter(self, queryset):
+        """Apply search filter to queryset"""
         search = self.request.query_params.get('search', None)
         if search:
             queryset = queryset.filter(
                 Q(name__icontains=search) |
                 Q(description__icontains=search)
             )
+        return queryset
 
-        # Stock availability filtering
+    def _apply_stock_availability_filter(self, queryset):
+        """Apply stock availability filter to queryset"""
         in_stock = self.request.query_params.get('in_stock', None)
         if in_stock is not None:
             if in_stock.lower() == 'true':
                 queryset = queryset.filter(stock__gt=0)
             elif in_stock.lower() == 'false':
                 queryset = queryset.filter(stock=0)
+        return queryset
 
-        # Price range filtering
+    def _apply_price_range_filters(self, queryset):
+        """Apply price range filters to queryset"""
         min_price = self.request.query_params.get('min_price', None)
         max_price = self.request.query_params.get('max_price', None)
 
@@ -501,8 +563,10 @@ class ProductListAPIView(ListAPIView):
                 queryset = queryset.filter(price__lte=float(max_price))
             except ValueError:
                 pass
+        return queryset
 
-        # Stock range filtering
+    def _apply_stock_range_filters(self, queryset):
+        """Apply stock range filters to queryset"""
         min_stock = self.request.query_params.get('min_stock', None)
         max_stock = self.request.query_params.get('max_stock', None)
 
@@ -517,8 +581,10 @@ class ProductListAPIView(ListAPIView):
                 queryset = queryset.filter(stock__lte=int(max_stock))
             except ValueError:
                 pass
+        return queryset
 
-        # Ordering
+    def _apply_ordering(self, queryset):
+        """Apply ordering to queryset"""
         ordering = self.request.query_params.get('ordering', None)
         if ordering:
             # Validate ordering field to prevent injection
@@ -528,15 +594,16 @@ class ProductListAPIView(ListAPIView):
         else:
             # Default ordering
             queryset = queryset.order_by('name')
+        return queryset
 
-        # Limit results
+    def _apply_limit(self, queryset):
+        """Apply limit to queryset"""
         limit = self.request.query_params.get('limit', None)
         if limit is not None:
             try:
                 queryset = queryset[:int(limit)]
             except ValueError:
                 pass
-
         return queryset
 
 
@@ -588,8 +655,17 @@ class UserListAPIView(ListAPIView):
         Advanced dynamic filtering for users
         """
         queryset = User.objects.all()
+        queryset = self._apply_search_filter(queryset)
+        queryset = self._apply_username_filter(queryset)
+        queryset = self._apply_email_domain_filter(queryset)
+        queryset = self._apply_active_status_filter(queryset)
+        queryset = self._apply_date_range_filters(queryset)
+        queryset = self._apply_ordering(queryset)
+        queryset = self._apply_limit(queryset)
+        return queryset
 
-        # Search functionality
+    def _apply_search_filter(self, queryset):
+        """Apply search filter to queryset"""
         search = self.request.query_params.get('search', None)
         if search:
             queryset = queryset.filter(
@@ -598,26 +674,34 @@ class UserListAPIView(ListAPIView):
                 Q(last_name__icontains=search) |
                 Q(email__icontains=search)
             )
+        return queryset
 
-        # Exact username match
+    def _apply_username_filter(self, queryset):
+        """Apply username filter to queryset"""
         username = self.request.query_params.get('username', None)
         if username:
             queryset = queryset.filter(username__icontains=username)
+        return queryset
 
-        # Email domain filtering
+    def _apply_email_domain_filter(self, queryset):
+        """Apply email domain filter to queryset"""
         email_domain = self.request.query_params.get('email_domain', None)
         if email_domain:
             queryset = queryset.filter(email__endswith=f'@{email_domain}')
+        return queryset
 
-        # Active status filtering
+    def _apply_active_status_filter(self, queryset):
+        """Apply active status filter to queryset"""
         is_active = self.request.query_params.get('is_active', None)
         if is_active is not None:
             if is_active.lower() == 'true':
                 queryset = queryset.filter(is_active=True)
             elif is_active.lower() == 'false':
                 queryset = queryset.filter(is_active=False)
+        return queryset
 
-        # Date range filtering for date_joined
+    def _apply_date_range_filters(self, queryset):
+        """Apply date range filters to queryset"""
         date_joined_after = self.request.query_params.get('date_joined_after', None)
         date_joined_before = self.request.query_params.get('date_joined_before', None)
 
@@ -636,8 +720,10 @@ class UserListAPIView(ListAPIView):
                     queryset = queryset.filter(date_joined__lte=date_before)
             except ValueError:
                 pass
+        return queryset
 
-        # Ordering
+    def _apply_ordering(self, queryset):
+        """Apply ordering to queryset"""
         ordering = self.request.query_params.get('ordering', None)
         if ordering:
             allowed_fields = ['username', 'email', 'first_name', 'last_name', 'date_joined',
@@ -646,15 +732,16 @@ class UserListAPIView(ListAPIView):
                 queryset = queryset.order_by(ordering)
         else:
             queryset = queryset.order_by('username')
+        return queryset
 
-        # Limit results
+    def _apply_limit(self, queryset):
+        """Apply limit to queryset"""
         limit = self.request.query_params.get('limit', None)
         if limit is not None:
             try:
                 queryset = queryset[:int(limit)]
             except ValueError:
                 pass
-
         return queryset
 
 
@@ -700,13 +787,22 @@ class OrderListAPIView(ListAPIView):
         """
         # Use prefetch_related for optimized queries
         queryset = Order.objects.prefetch_related('items__product').filter(user=self.request.user)
+        queryset = self._apply_status_filter(queryset)
+        queryset = self._apply_date_range_filters(queryset)
+        queryset = self._apply_items_filter(queryset)
+        queryset = self._apply_ordering(queryset)
+        queryset = self._apply_limit(queryset)
+        return queryset
 
-        # Status filtering
+    def _apply_status_filter(self, queryset):
+        """Apply status filter to queryset"""
         status = self.request.query_params.get('status', None)
         if status:
             queryset = queryset.filter(status=status)
+        return queryset
 
-        # Date range filtering
+    def _apply_date_range_filters(self, queryset):
+        """Apply date range filters to queryset"""
         created_after = self.request.query_params.get('created_after', None)
         created_before = self.request.query_params.get('created_before', None)
 
@@ -725,16 +821,20 @@ class OrderListAPIView(ListAPIView):
                     queryset = queryset.filter(created_at__lte=date_before)
             except ValueError:
                 pass
+        return queryset
 
-        # Filter by orders with/without items
+    def _apply_items_filter(self, queryset):
+        """Apply items filter to queryset"""
         has_items = self.request.query_params.get('has_items', None)
         if has_items is not None:
             if has_items.lower() == 'true':
                 queryset = queryset.filter(items__isnull=False).distinct()
             elif has_items.lower() == 'false':
                 queryset = queryset.filter(items__isnull=True)
+        return queryset
 
-        # Ordering
+    def _apply_ordering(self, queryset):
+        """Apply ordering to queryset"""
         ordering = self.request.query_params.get('ordering', None)
         if ordering:
             allowed_fields = ['created_at', 'status', 'order_id', '-created_at', '-status', '-order_id']
@@ -743,15 +843,16 @@ class OrderListAPIView(ListAPIView):
         else:
             # Default ordering by creation date (newest first)
             queryset = queryset.order_by('-created_at')
+        return queryset
 
-        # Limit results
+    def _apply_limit(self, queryset):
+        """Apply limit to queryset"""
         limit = self.request.query_params.get('limit', None)
         if limit is not None:
             try:
                 queryset = queryset[:int(limit)]
             except ValueError:
                 pass
-
         return queryset
 
 
@@ -775,40 +876,74 @@ def product_info(request):
     """
     Enhanced API view for product information and statistics with dynamic filtering
     """
-    # Get base queryset
-    products = Product.objects.all()
+    # Get base queryset and apply filters
+    products = _apply_product_filters(Product.objects.all(), request)
 
-    # Apply filters from request
+    # Calculate statistics
+    stats = _calculate_product_statistics(products)
+
+    # Prepare data for serializer
+    data = {
+        'products': products,
+        **stats,
+        'filters_applied': _get_applied_filters(request)
+    }
+
+    serializer = ProductInfoSerializer(data)
+    return Response(serializer.data)
+
+
+def _apply_product_filters(queryset, request):
+    """Apply filters to product queryset"""
+    queryset = _apply_search_filter(queryset, request)
+    queryset = _apply_stock_availability_filter(queryset, request)
+    queryset = _apply_price_range_filters(queryset, request)
+    return queryset
+
+
+def _apply_search_filter(queryset, request):
+    """Apply search filter to queryset"""
     search = request.query_params.get('search', None)
     if search:
-        products = products.filter(
+        queryset = queryset.filter(
             Q(name__icontains=search) |
             Q(description__icontains=search)
         )
+    return queryset
 
+
+def _apply_stock_availability_filter(queryset, request):
+    """Apply stock availability filter to queryset"""
     in_stock = request.query_params.get('in_stock', None)
     if in_stock is not None:
         if in_stock.lower() == 'true':
-            products = products.filter(stock__gt=0)
+            queryset = queryset.filter(stock__gt=0)
         elif in_stock.lower() == 'false':
-            products = products.filter(stock=0)
+            queryset = queryset.filter(stock=0)
+    return queryset
 
+
+def _apply_price_range_filters(queryset, request):
+    """Apply price range filters to queryset"""
     min_price = request.query_params.get('min_price', None)
     max_price = request.query_params.get('max_price', None)
 
     if min_price is not None:
         try:
-            products = products.filter(price__gte=float(min_price))
+            queryset = queryset.filter(price__gte=float(min_price))
         except ValueError:
             pass
 
     if max_price is not None:
         try:
-            products = products.filter(price__lte=float(max_price))
+            queryset = queryset.filter(price__lte=float(max_price))
         except ValueError:
             pass
+    return queryset
 
-    # Calculate statistics on filtered data
+
+def _calculate_product_statistics(products):
+    """Calculate product statistics"""
     total_products = products.count()
     in_stock_products = products.filter(stock__gt=0).count()
     out_of_stock_products = total_products - in_stock_products
@@ -830,9 +965,7 @@ def product_info(request):
         avg_stock=Avg('stock')
     )
 
-    # Prepare data for serializer
-    data = {
-        'products': products,
+    return {
         'count': total_products,
         'max_price': float(price_stats['max_price']) if price_stats['max_price'] else 0,
         'min_price': float(min_price_value),
@@ -841,13 +974,14 @@ def product_info(request):
         'out_of_stock_count': out_of_stock_products,
         'total_stock': int(stock_stats['total_stock']) if stock_stats['total_stock'] else 0,
         'average_stock': float(stock_stats['avg_stock']) if stock_stats['avg_stock'] else 0,
-        'filters_applied': {
-            'search': search,
-            'in_stock': in_stock,
-            'min_price': min_price,
-            'max_price': max_price
-        }
     }
 
-    serializer = ProductInfoSerializer(data)
-    return Response(serializer.data)
+
+def _get_applied_filters(request):
+    """Get applied filters from request"""
+    return {
+        'search': request.query_params.get('search', None),
+        'in_stock': request.query_params.get('in_stock', None),
+        'min_price': request.query_params.get('min_price', None),
+        'max_price': request.query_params.get('max_price', None)
+    }

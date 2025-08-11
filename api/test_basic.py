@@ -122,7 +122,7 @@ class BasicSerializerTests(TestCase):
     def test_order_serializer(self):
         """Test order serializer"""
         order = Order.objects.create(user=self.user)
-        order_item = OrderItem.objects.create(
+        OrderItem.objects.create(
             order=order,
             product=self.product,
             quantity=2
@@ -329,8 +329,6 @@ class BasicOrderTests(APITestCase):
 
     def test_order_list_user_specific(self):
         """Test that users only see their own orders"""
-        # Create an order for the user
-        order = Order.objects.create(user=self.user, status='Pending')
 
         self.client.force_authenticate(user=self.user)
         url = reverse('order-list')

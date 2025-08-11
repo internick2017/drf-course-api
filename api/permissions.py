@@ -29,12 +29,8 @@ class IsProductOwnerOrReadOnly(permissions.BasePermission):
         return request.user and request.user.is_authenticated
 
     def has_object_permission(self, request, view, obj):
-        # Read permissions are allowed for any request
-        if request.method in permissions.SAFE_METHODS:
-            return True
-
-        # Write permissions are only allowed to authenticated users
-        return request.user and request.user.is_authenticated
+        # For products, object-level permissions are the same as general permissions
+        return self.has_permission(request, view)
 
 
 class IsOrderOwner(permissions.BasePermission):
@@ -76,12 +72,8 @@ class IsAdminOrReadOnly(permissions.BasePermission):
         return request.user and request.user.is_staff
 
     def has_object_permission(self, request, view, obj):
-        # Read permissions are allowed for any request
-        if request.method in permissions.SAFE_METHODS:
-            return True
-
-        # Write permissions are only allowed to admin users
-        return request.user and request.user.is_staff
+        # For admin permissions, object-level permissions are the same as general permissions
+        return self.has_permission(request, view)
 
 
 class IsOwnerOrAdmin(permissions.BasePermission):
