@@ -12,12 +12,15 @@ from django.utils.dateparse import parse_date
 import time
 import random
 from silk.profiling.profiler import silk_profile
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter  # type: ignore
+from drf_spectacular.types import OpenApiTypes  # type: ignore
 from .models import User, Product, Order, OrderItem
 from .serializers import UserSerializer, ProductSerializer, OrderSerializer, OrderItemSerializer, ProductInfoSerializer
 from .permissions import (
     IsOrderOwner, IsOrderItemOwner,
     IsAdminOrReadOnly, IsAuthenticatedOrReadOnlyForProducts
 )
+from .filters import UserFilter, ProductFilter, OrderFilter, OrderItemFilter
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
@@ -26,6 +29,35 @@ from django.core.exceptions import ValidationError
 
 
 # JWT Authentication Views
+@extend_schema(
+    summary="User login",
+    description="Authenticate user and return JWT tokens",
+    tags=["Authentication"],
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'username': {'type': 'string', 'description': 'Username'},
+                'password': {'type': 'string', 'description': 'Password'},
+            },
+            'required': ['username', 'password']
+        }
+    },
+    responses={
+        200: {
+            'description': 'Login successful',
+            'type': 'object',
+            'properties': {
+                'access': {'type': 'string', 'description': 'Access token'},
+                'refresh': {'type': 'string', 'description': 'Refresh token'},
+                'message': {'type': 'string', 'description': 'Success message'}
+            }
+        },
+        401: {'description': 'Invalid credentials'},
+        400: {'description': 'Token error'},
+        500: {'description': 'Authentication failed'}
+    }
+)
 class CustomTokenObtainPairView(TokenObtainPairView):
     """
     Custom token obtain view with better error handling and response format
@@ -51,6 +83,50 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 'detail': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+@extend_schema(
+    summary="User registration",
+    description="Register a new user and return JWT tokens",
+    tags=["Authentication"],
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'username': {'type': 'string', 'description': 'Username'},
+                'email': {'type': 'string', 'description': 'Email address'},
+                'password': {'type': 'string', 'description': 'Password'},
+                'first_name': {'type': 'string', 'description': 'First name'},
+                'last_name': {'type': 'string', 'description': 'Last name'},
+            },
+            'required': ['username', 'email', 'password']
+        }
+    },
+    responses={
+        201: {
+            'description': 'User registered successfully',
+            'type': 'object',
+            'properties': {
+                'message': {'type': 'string', 'description': 'Success message'},
+                'user': {
+                    'type': 'object',
+                    'properties': {
+                        'id': {'type': 'integer', 'description': 'User ID'},
+                        'username': {'type': 'string', 'description': 'Username'},
+                        'email': {'type': 'string', 'description': 'Email'},
+                        'is_staff': {'type': 'boolean', 'description': 'Staff status'}
+                    }
+                },
+                'tokens': {
+                    'type': 'object',
+                    'properties': {
+                        'access': {'type': 'string', 'description': 'Access token'},
+                        'refresh': {'type': 'string', 'description': 'Refresh token'}
+                    }
+                }
+            }
+        },
+        400: {'description': 'Registration failed'}
+    }
+)
 class UserRegistrationView(generics.CreateAPIView):
     """
     User registration view with JWT token response
@@ -101,11 +177,51 @@ class UserRegistrationView(generics.CreateAPIView):
         }, status=status.HTTP_400_BAD_REQUEST)
 
 
+@extend_schema_view(
+    list=extend_schema(
+        summary="List users",
+        description="Get a list of all users with advanced filtering options",
+        tags=["Users"],
+        parameters=[
+            OpenApiParameter(name="search", type=OpenApiTypes.STR, description="Search in username, first_name, last_name, email"),
+            OpenApiParameter(name="username", type=OpenApiTypes.STR, description="Filter by username"),
+            OpenApiParameter(name="email", type=OpenApiTypes.STR, description="Filter by email"),
+            OpenApiParameter(name="email_domain", type=OpenApiTypes.STR, description="Filter by email domain"),
+            OpenApiParameter(name="is_active", type=OpenApiTypes.BOOL, description="Filter by active status"),
+            OpenApiParameter(name="has_orders", type=OpenApiTypes.BOOL, description="Filter users who have placed orders"),
+            OpenApiParameter(name="ordering", type=OpenApiTypes.STR, description="Order by field (username, email, date_joined)"),
+        ]
+    ),
+    create=extend_schema(
+        summary="Create user",
+        description="Create a new user (Admin only)",
+        tags=["Users"]
+    ),
+    retrieve=extend_schema(
+        summary="Get user details",
+        description="Get detailed information about a specific user",
+        tags=["Users"]
+    ),
+    update=extend_schema(
+        summary="Update user",
+        description="Update user information (Admin only)",
+        tags=["Users"]
+    ),
+    destroy=extend_schema(
+        summary="Delete user",
+        description="Delete a user (Admin only)",
+        tags=["Users"]
+    )
+)
 class UserViewSet(viewsets.ModelViewSet):
-    """ViewSet for User model with dynamic filtering"""
+    """ViewSet for User model with advanced filtering and Django filtering"""
     queryset = User.objects.all()
     serializer_class = UserSerializer
     permission_classes = [IsAdminOrReadOnly]  # Only admins can manage users
+    filterset_class = UserFilter
+    search_fields = ['username', 'first_name', 'last_name', 'email']
+    ordering_fields = ['username', 'email', 'first_name', 'last_name', 'date_joined']
+    ordering = ['username']
 
     def get_queryset(self):
         """
@@ -184,11 +300,54 @@ class UserViewSet(viewsets.ModelViewSet):
         return queryset
 
 
+@extend_schema_view(
+    list=extend_schema(
+        summary="List products",
+        description="Get a list of all products with advanced filtering options",
+        tags=["Products"],
+        parameters=[
+            OpenApiParameter(name="search", type=OpenApiTypes.STR, description="Search in name and description"),
+            OpenApiParameter(name="name", type=OpenApiTypes.STR, description="Filter by product name"),
+            OpenApiParameter(name="in_stock", type=OpenApiTypes.BOOL, description="Filter products in stock"),
+            OpenApiParameter(name="out_of_stock", type=OpenApiTypes.BOOL, description="Filter products out of stock"),
+            OpenApiParameter(name="price_min", type=OpenApiTypes.NUMBER, description="Minimum price"),
+            OpenApiParameter(name="price_max", type=OpenApiTypes.NUMBER, description="Maximum price"),
+            OpenApiParameter(name="stock_min", type=OpenApiTypes.INT, description="Minimum stock"),
+            OpenApiParameter(name="stock_max", type=OpenApiTypes.INT, description="Maximum stock"),
+            OpenApiParameter(name="has_orders", type=OpenApiTypes.BOOL, description="Filter products that have been ordered"),
+            OpenApiParameter(name="ordering", type=OpenApiTypes.STR, description="Order by field (name, price, stock, created_at)"),
+        ]
+    ),
+    create=extend_schema(
+        summary="Create product",
+        description="Create a new product (Authenticated users only)",
+        tags=["Products"]
+    ),
+    retrieve=extend_schema(
+        summary="Get product details",
+        description="Get detailed information about a specific product",
+        tags=["Products"]
+    ),
+    update=extend_schema(
+        summary="Update product",
+        description="Update product information (Authenticated users only)",
+        tags=["Products"]
+    ),
+    destroy=extend_schema(
+        summary="Delete product",
+        description="Delete a product (Authenticated users only)",
+        tags=["Products"]
+    )
+)
 class ProductViewSet(viewsets.ModelViewSet):
-    """ViewSet for Product model with dynamic filtering"""
+    """ViewSet for Product model with advanced filtering and Django filtering"""
     queryset = Product.objects.all()
     serializer_class = ProductSerializer
     permission_classes = [IsAuthenticatedOrReadOnlyForProducts]  # Read for everyone, write for authenticated
+    filterset_class = ProductFilter
+    search_fields = ['name', 'description']
+    ordering_fields = ['name', 'price', 'stock', 'created_at']
+    ordering = ['name']
 
     def get_queryset(self):
         """
@@ -276,11 +435,53 @@ class ProductViewSet(viewsets.ModelViewSet):
         return Response({'in_stock': product.in_stock})
 
 
+@extend_schema_view(
+    list=extend_schema(
+        summary="List orders",
+        description="Get a list of orders with advanced filtering options",
+        tags=["Orders"],
+        parameters=[
+            OpenApiParameter(name="order_id", type=OpenApiTypes.STR, description="Filter by order ID"),
+            OpenApiParameter(name="user_username", type=OpenApiTypes.STR, description="Filter by user username"),
+            OpenApiParameter(name="user_email", type=OpenApiTypes.STR, description="Filter by user email"),
+            OpenApiParameter(name="status", type=OpenApiTypes.STR, description="Filter by order status"),
+            OpenApiParameter(name="has_items", type=OpenApiTypes.BOOL, description="Filter orders with items"),
+
+            OpenApiParameter(name="created_after", type=OpenApiTypes.DATE, description="Created after date"),
+            OpenApiParameter(name="created_before", type=OpenApiTypes.DATE, description="Created before date"),
+            OpenApiParameter(name="ordering", type=OpenApiTypes.STR, description="Order by field (created_at, status, order_id)"),
+        ]
+    ),
+    create=extend_schema(
+        summary="Create order",
+        description="Create a new order",
+        tags=["Orders"]
+    ),
+    retrieve=extend_schema(
+        summary="Get order details",
+        description="Get detailed information about a specific order",
+        tags=["Orders"]
+    ),
+    update=extend_schema(
+        summary="Update order",
+        description="Update order information",
+        tags=["Orders"]
+    ),
+    destroy=extend_schema(
+        summary="Delete order",
+        description="Delete an order",
+        tags=["Orders"]
+    )
+)
 class OrderViewSet(viewsets.ModelViewSet):
-    """ViewSet for Order model with dynamic filtering"""
+    """ViewSet for Order model with advanced filtering and Django filtering"""
     queryset = Order.objects.all()
     serializer_class = OrderSerializer
     permission_classes = [IsOrderOwner]  # Users can only access their own orders
+    filterset_class = OrderFilter
+    search_fields = ['order_id', 'user__username', 'user__email']
+    ordering_fields = ['created_at', 'status', 'order_id']
+    ordering = ['-created_at']
 
     def get_queryset(self):
         """
@@ -365,11 +566,52 @@ class OrderViewSet(viewsets.ModelViewSet):
         return Response(stats)
 
 
+@extend_schema_view(
+    list=extend_schema(
+        summary="List order items",
+        description="Get a list of order items with advanced filtering options",
+        tags=["Order Items"],
+        parameters=[
+            OpenApiParameter(name="order_id", type=OpenApiTypes.STR, description="Filter by order ID"),
+            OpenApiParameter(name="product_name", type=OpenApiTypes.STR, description="Filter by product name"),
+            OpenApiParameter(name="product_id", type=OpenApiTypes.INT, description="Filter by product ID"),
+            OpenApiParameter(name="user_username", type=OpenApiTypes.STR, description="Filter by user username"),
+            OpenApiParameter(name="quantity_min", type=OpenApiTypes.INT, description="Minimum quantity"),
+            OpenApiParameter(name="quantity_max", type=OpenApiTypes.INT, description="Maximum quantity"),
+
+            OpenApiParameter(name="ordering", type=OpenApiTypes.STR, description="Order by field (quantity, product__name, order__created_at)"),
+        ]
+    ),
+    create=extend_schema(
+        summary="Create order item",
+        description="Create a new order item",
+        tags=["Order Items"]
+    ),
+    retrieve=extend_schema(
+        summary="Get order item details",
+        description="Get detailed information about a specific order item",
+        tags=["Order Items"]
+    ),
+    update=extend_schema(
+        summary="Update order item",
+        description="Update order item information",
+        tags=["Order Items"]
+    ),
+    destroy=extend_schema(
+        summary="Delete order item",
+        description="Delete an order item",
+        tags=["Order Items"]
+    )
+)
 class OrderItemViewSet(viewsets.ModelViewSet):
-    """ViewSet for OrderItem model with dynamic filtering"""
+    """ViewSet for OrderItem model with advanced filtering and Django filtering"""
     queryset = OrderItem.objects.all()
     serializer_class = OrderItemSerializer
     permission_classes = [IsOrderItemOwner]  # Users can only access their own order items
+    filterset_class = OrderItemFilter
+    search_fields = ['order__order_id', 'product__name']
+    ordering_fields = ['quantity', 'product__name', 'order__created_at']
+    ordering = ['-order__created_at']
 
     def get_queryset(self):
         """
@@ -446,6 +688,39 @@ class OrderItemViewSet(viewsets.ModelViewSet):
         return queryset
 
 
+@extend_schema(
+    summary="Profiling example",
+    description="Demonstrate django-silk profiling techniques with different performance scenarios",
+    tags=["Profiling"],
+    responses={
+        200: {
+            'description': 'Profiling data',
+            'type': 'object',
+            'properties': {
+                'message': {'type': 'string'},
+                'expensive_calculation_result': {'type': 'number'},
+                'database_stats': {
+                    'type': 'object',
+                    'properties': {
+                        'user_count': {'type': 'integer'},
+                        'product_count': {'type': 'integer'},
+                        'order_count': {'type': 'integer'}
+                    }
+                },
+                'manual_timing': {'type': 'number'},
+                'total_request_time': {'type': 'number'},
+                'profiling_info': {
+                    'type': 'object',
+                    'properties': {
+                        'silk_enabled': {'type': 'boolean'},
+                        'profiling_url': {'type': 'string'},
+                        'note': {'type': 'string'}
+                    }
+                }
+            }
+        }
+    }
+)
 class ProfilingExampleView(APIView):
     """Example view demonstrating django-silk profiling techniques"""
     permission_classes = [IsAuthenticated]
@@ -508,6 +783,33 @@ class ProfilingExampleView(APIView):
         })
 
 
+@extend_schema(
+    summary="Performance test",
+    description="Compare N+1 vs optimized queries for performance analysis",
+    tags=["Profiling"],
+    parameters=[
+        OpenApiParameter(
+            name="test",
+            type=OpenApiTypes.STR,
+            description="Test type: 'n_plus_one', 'optimized', or 'both' (default)",
+            required=False
+        )
+    ],
+    responses={
+        200: {
+            'description': 'Performance test results',
+            'type': 'object',
+            'properties': {
+                'test_type': {'type': 'string'},
+                'data': {'type': 'array'},
+                'note': {'type': 'string'},
+                'n_plus_one_test': {'type': 'object'},
+                'optimized_test': {'type': 'object'},
+                'comparison_note': {'type': 'string'}
+            }
+        }
+    }
+)
 class PerformanceTestView(APIView):
     """View for testing different performance scenarios"""
     permission_classes = [IsAuthenticated]

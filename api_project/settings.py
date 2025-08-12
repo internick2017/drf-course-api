@@ -44,6 +44,8 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'django_extensions',
     'silk',
+    'drf_spectacular',
+    'django_filters',
 
     # Local apps
     'api',
@@ -159,6 +161,12 @@ REST_FRAMEWORK = {
     'DEFAULT_PARSER_CLASSES': [
         'rest_framework.parsers.JSONParser',
     ],
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_FILTER_BACKENDS': [
+        'django_filters.rest_framework.DjangoFilterBackend',
+        'rest_framework.filters.SearchFilter',
+        'rest_framework.filters.OrderingFilter',
+    ],
 }
 
 # JWT Settings
@@ -198,3 +206,26 @@ SILKY_AUTHORISATION = False   # Disabled for development
 SILKY_MAX_RECORDED_REQUESTS = 1000
 SILKY_MAX_RECORDED_REQUESTS_CHECK_PERCENT = 10
 SILKY_META = True
+
+# DRF Spectacular Configuration for API Documentation
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'DRF Course API',
+    'DESCRIPTION': 'A comprehensive Django REST Framework API with JWT authentication, filtering, and profiling',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'COMPONENT_SPLIT_REQUEST': True,
+    'SCHEMA_PATH_PREFIX': '/api/',
+    'SWAGGER_UI_SETTINGS': {
+        'deepLinking': True,
+        'persistAuthorization': True,
+        'displayOperationId': True,
+    },
+    'TAGS': [
+        {'name': 'Authentication', 'description': 'JWT authentication endpoints'},
+        {'name': 'Users', 'description': 'User management operations'},
+        {'name': 'Products', 'description': 'Product catalog operations'},
+        {'name': 'Orders', 'description': 'Order management operations'},
+        {'name': 'Order Items', 'description': 'Order item operations'},
+        {'name': 'Profiling', 'description': 'Performance profiling endpoints'},
+    ],
+}
