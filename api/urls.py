@@ -11,6 +11,8 @@ from .views import (
     ProductListCreateAPIView, ProductCreateAPIView, ProductRetrieveUpdateDestroyAPIView,
     UserListCreateAPIView, OrderListCreateAPIView, OrderItemListCreateAPIView,
     ProductCreateOnlyAPIView, OrderCreateOnlyAPIView,
+    # Additional Update and Delete Generic Views
+    UserRetrieveUpdateDestroyAPIView, OrderRetrieveUpdateDestroyAPIView, OrderItemRetrieveUpdateDestroyAPIView,
     # JWT Authentication Views
     CustomTokenObtainPairView, UserRegistrationView,
     # Simple function-based view
@@ -63,13 +65,16 @@ urlpatterns = [
     path('enhanced/products/<int:id>/', ProductRetrieveUpdateDestroyAPIView.as_view(), name='product-retrieve-update-destroy'),
     path('enhanced/products/create-only/', ProductCreateOnlyAPIView.as_view(), name='product-create-only-simple'),
 
-    # Users with List and Create functionality
+    # Users with List, Create, Update, and Delete functionality
     path('enhanced/users/', UserListCreateAPIView.as_view(), name='user-list-create'),
+    path('enhanced/users/<str:username>/', UserRetrieveUpdateDestroyAPIView.as_view(), name='user-retrieve-update-destroy'),
 
-    # Orders with List and Create functionality
+    # Orders with List, Create, Update, and Delete functionality
     path('enhanced/orders/', OrderListCreateAPIView.as_view(), name='order-list-create'),
+    path('enhanced/orders/<uuid:pk>/', OrderRetrieveUpdateDestroyAPIView.as_view(), name='order-retrieve-update-destroy'),
     path('enhanced/orders/create-only/', OrderCreateOnlyAPIView.as_view(), name='order-create-only'),
 
-    # Order Items with List and Create functionality
+    # Order Items with List, Create, Update, and Delete functionality
     path('enhanced/order-items/', OrderItemListCreateAPIView.as_view(), name='order-item-list-create'),
+    path('enhanced/order-items/<int:pk>/', OrderItemRetrieveUpdateDestroyAPIView.as_view(), name='order-item-retrieve-update-destroy'),
 ]

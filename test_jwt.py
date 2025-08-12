@@ -5,18 +5,15 @@ This script tests the JWT authentication setup without running the server
 """
 
 import os
-import uuid
+import django
 from django.test import TestCase
 from rest_framework.test import APIClient
 from api.models import User
+import uuid
 
-# Setup Django environment
+
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'api_project.settings')
-
-import django
 django.setup()
-
-
 
 
 class JWTAuthenticationTest(TestCase):

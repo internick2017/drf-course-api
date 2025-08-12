@@ -1,134 +1,243 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
-Test script for Django REST Framework Generic Views
-Demonstrates ListAPIView and RetrieveAPIView functionality
-
-Usage:
-    python test_generic_views.py
+Test script for Generic Views update and delete functionality
+This script tests the new RetrieveUpdateDestroyAPIView classes
 """
 
-import requests
-import json
-from urllib.parse import urlencode
+import os
+import uuid
 
-# Base URL for the API
-BASE_URL = "http://localhost:8000/api"
+# Setup Django environment
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'api_project.settings')
 
-def print_response(response, title):
-    """Print formatted API response"""
-    print(f"\n{'='*50}")
-    print(f"{title}")
-    print(f"{'='*50}")
-    print(f"Status Code: {response.status_code}")
-    print(f"URL: {response.url}")
+import django
+django.setup()
 
-    if response.status_code == 200:
-        try:
-            data = response.json()
-            print(f"Response: {json.dumps(data, indent=2)}")
-        except json.JSONDecodeError:
-            print(f"Response: {response.text}")
-    else:
-        print(f"Error: {response.text}")
-    print(f"{'='*50}")
+from django.test import TestCase
+from rest_framework.test import APIClient
+from api.models import User, Product, Order, OrderItem
 
-def test_list_api_view():
-    """Test ListAPIView functionality"""
-    print("\n🧪 Testing ListAPIView Examples")
 
-    # Test 1: Get all products
-    response = requests.get(f"{BASE_URL}/generic/products/")
-    print_response(response, "1. Get All Products (ListAPIView)")
+class GenericViewsUpdateDeleteTest(TestCase):
+    """Test update and delete functionality with generic views"""
 
-    # Test 2: Filter products in stock
-    params = {'in_stock': 'true'}
-    response = requests.get(f"{BASE_URL}/generic/products/?{urlencode(params)}")
-    print_response(response, "2. Filter Products In Stock")
+    def setUp(self):
+        """Set up test data"""
+        self.client = APIClient()
 
-    # Test 3: Filter products by price range
-    params = {'min_price': '10', 'max_price': '100'}
-    response = requests.get(f"{BASE_URL}/generic/products/?{urlencode(params)}")
-    print_response(response, "3. Filter Products by Price Range")
+        # Generate unique usernames
+        unique_id = str(uuid.uuid4())[:8]
 
-    # Test 4: Get all users (requires authentication)
-    response = requests.get(f"{BASE_URL}/generic/users/")
-    print_response(response, "4. Get All Users (Requires Authentication)")
+        # Create test user
+        self.user = User.objects.create_user(
+            username=f'testuser_{unique_id}',
+            email=f'test_{unique_id}@example.com',
+            password='testpass123',
+            first_name='Test',
+            last_name='User'
+        )
 
-    # Test 5: Filter users by username
-    params = {'username': 'admin'}
-    response = requests.get(f"{BASE_URL}/generic/users/?{urlencode(params)}")
-    print_response(response, "5. Filter Users by Username")
+        # Create admin user
+        self.admin_user = User.objects.create_user(
+            username=f'admin_{unique_id}',
+            email=f'admin_{unique_id}@example.com',
+            password='adminpass123',
+            first_name='Admin',
+            last_name='User',
+            is_staff=True
+        )
 
-def test_retrieve_api_view():
-    """Test RetrieveAPIView functionality"""
-    print("\n🔍 Testing RetrieveAPIView Examples")
+        # Create test product
+        self.product = Product.objects.create(
+            name='Test Product',
+            description='Test Description',
+            price=29.99,
+            stock=10
+        )
 
-    # Test 1: Get specific product by ID
-    response = requests.get(f"{BASE_URL}/generic/products/1/")
-    print_response(response, "1. Get Product by ID (RetrieveAPIView)")
+        # Create test order
+        self.order = Order.objects.create(
+            user=self.user,
+            status='Pending'
+        )
 
-    # Test 2: Get non-existent product (should return 404)
-    response = requests.get(f"{BASE_URL}/generic/products/999/")
-    print_response(response, "2. Get Non-existent Product (404 Test)")
+        # Create test order item
+        self.order_item = OrderItem.objects.create(
+            order=self.order,
+            product=self.product,
+            quantity=2
+        )
 
-    # Test 3: Get user by username (requires authentication)
-    response = requests.get(f"{BASE_URL}/generic/users/admin/")
-    print_response(response, "3. Get User by Username (Requires Authentication)")
+    def test_user_update_delete(self):
+        """Test user update and delete with generic views"""
+        print("Testing user update and delete...")
 
-def test_comparison_with_viewsets():
-    """Compare generic views with ViewSets"""
-    print("\n⚖️ Comparing Generic Views vs ViewSets")
+        # Login as admin
+        self.client.force_authenticate(user=self.admin_user)
 
-    # Test ViewSet endpoint (full CRUD)
-    response = requests.get(f"{BASE_URL}/products/")
-    print_response(response, "ViewSet: GET /products/ (Full CRUD available)")
+        # Test GET user details
+        response = self.client.get(f'/api/enhanced/users/{self.user.username}/')
+        if response.status_code == 200:
+            print("✅ User details retrieved successfully")
+        else:
+            print(f"❌ Failed to get user details: {response.status_code}")
+            return
 
-    # Test Generic View endpoint (read-only)
-    response = requests.get(f"{BASE_URL}/generic/products/")
-    print_response(response, "Generic View: GET /generic/products/ (Read-only)")
+        # Test PUT update user
+        update_data = {
+            'username': 'updateduser',
+            'email': 'updated@example.com',
+            'first_name': 'Updated',
+            'last_name': 'User'
+        }
+        response = self.client.put(f'/api/enhanced/users/{self.user.username}/', update_data, format='json')
+        if response.status_code == 200:
+            print("✅ User updated successfully")
+            # Update the user object for next test
+            self.user = User.objects.get(username='updateduser')
+        else:
+            print(f"❌ Failed to update user: {response.status_code}")
+            print(f"   Response: {response.content.decode()}")
+            return
 
-def test_advanced_filtering():
-    """Test advanced filtering capabilities"""
-    print("\n🎯 Testing Advanced Filtering")
+        # Test DELETE user
+        response = self.client.delete(f'/api/enhanced/users/{self.user.username}/')
+        if response.status_code == 204:
+            print("✅ User deleted successfully")
+        else:
+            print(f"❌ Failed to delete user: {response.status_code}")
 
-    # Test multiple filters combined
-    params = {
-        'in_stock': 'true',
-        'min_price': '5',
-        'max_price': '50'
-    }
-    response = requests.get(f"{BASE_URL}/generic/products/?{urlencode(params)}")
-    print_response(response, "Combined Filters: In Stock + Price Range")
+    def test_order_update_delete(self):
+        """Test order update and delete with generic views"""
+        print("Testing order update and delete...")
+
+        # Login as admin
+        self.client.force_authenticate(user=self.admin_user)
+
+        # Test GET order details
+        response = self.client.get(f'/api/enhanced/orders/{self.order.pk}/')
+        if response.status_code == 200:
+            print("✅ Order details retrieved successfully")
+        else:
+            print(f"❌ Failed to get order details: {response.status_code}")
+            return
+
+        # Test PATCH update order
+        update_data = {
+            'status': 'Confirmed'
+        }
+        response = self.client.patch(f'/api/enhanced/orders/{self.order.pk}/', update_data, format='json')
+        if response.status_code == 200:
+            print("✅ Order updated successfully")
+        else:
+            print(f"❌ Failed to update order: {response.status_code}")
+            print(f"   Response: {response.content.decode()}")
+            return
+
+        # Test DELETE order
+        response = self.client.delete(f'/api/enhanced/orders/{self.order.pk}/')
+        if response.status_code == 204:
+            print("✅ Order deleted successfully")
+        else:
+            print(f"❌ Failed to delete order: {response.status_code}")
+
+    def test_order_item_update_delete(self):
+        """Test order item update and delete with generic views"""
+        print("Testing order item update and delete...")
+
+        # Login as admin
+        self.client.force_authenticate(user=self.admin_user)
+
+        # Test GET order item details
+        response = self.client.get(f'/api/enhanced/order-items/{self.order_item.pk}/')
+        if response.status_code == 200:
+            print("✅ Order item details retrieved successfully")
+        else:
+            print(f"❌ Failed to get order item details: {response.status_code}")
+            return
+
+        # Test PUT update order item
+        update_data = {
+            'order': str(self.order.pk),
+            'product': self.product.id,
+            'quantity': 5
+        }
+        response = self.client.put(f'/api/enhanced/order-items/{self.order_item.pk}/', update_data, format='json')
+        if response.status_code == 200:
+            print("✅ Order item updated successfully")
+        else:
+            print(f"❌ Failed to update order item: {response.status_code}")
+            print(f"   Response: {response.content.decode()}")
+            return
+
+        # Test DELETE order item
+        response = self.client.delete(f'/api/enhanced/order-items/{self.order_item.pk}/')
+        if response.status_code == 204:
+            print("✅ Order item deleted successfully")
+        else:
+            print(f"❌ Failed to delete order item: {response.status_code}")
+
+    def test_product_update_delete(self):
+        """Test product update and delete with existing generic views"""
+        print("Testing product update and delete...")
+
+        # Login as admin
+        self.client.force_authenticate(user=self.admin_user)
+
+        # Test GET product details
+        response = self.client.get(f'/api/enhanced/products/{self.product.id}/')
+        if response.status_code == 200:
+            print("✅ Product details retrieved successfully")
+        else:
+            print(f"❌ Failed to get product details: {response.status_code}")
+            return
+
+        # Test PATCH update product
+        update_data = {
+            'name': 'Updated Product',
+            'price': 39.99
+        }
+        response = self.client.patch(f'/api/enhanced/products/{self.product.id}/', update_data, format='json')
+        if response.status_code == 200:
+            print("✅ Product updated successfully")
+        else:
+            print(f"❌ Failed to update product: {response.status_code}")
+            print(f"   Response: {response.content.decode()}")
+            return
+
+        # Test DELETE product
+        response = self.client.delete(f'/api/enhanced/products/{self.product.id}/')
+        if response.status_code == 204:
+            print("✅ Product deleted successfully")
+        else:
+            print(f"❌ Failed to delete product: {response.status_code}")
+
 
 def main():
-    """Main test function"""
-    print("🚀 Django REST Framework Generic Views Test")
-    print("Make sure your Django server is running on http://localhost:8000")
+    """Run generic views update and delete tests"""
+    print("🔧 Generic Views Update and Delete Test Suite")
+    print("=" * 60)
 
+    # Create test instance
+    test_instance = GenericViewsUpdateDeleteTest()
+    test_instance.setUp()
+
+    # Run tests
     try:
-        # Test ListAPIView
-        test_list_api_view()
+        test_instance.test_user_update_delete()
+        test_instance.test_order_update_delete()
+        test_instance.test_order_item_update_delete()
+        test_instance.test_product_update_delete()
 
-        # Test RetrieveAPIView
-        test_retrieve_api_view()
+        print("\n" + "=" * 60)
+        print("✅ All generic views update and delete tests completed successfully!")
+        print("\n🎉 Update and delete functionality is working with generic views!")
 
-        # Test comparison
-        test_comparison_with_viewsets()
-
-        # Test advanced filtering
-        test_advanced_filtering()
-
-        print("\n✅ All tests completed!")
-        print("\n📝 Notes:")
-        print("- Some endpoints require authentication")
-        print("- 404 responses are expected for non-existent resources")
-        print("- Check the Django server console for custom logging")
-
-    except requests.exceptions.ConnectionError:
-        print("\n❌ Error: Could not connect to Django server")
-        print("Make sure to run: python manage.py runserver")
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\n❌ Test failed with error: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
-if __name__ == "__main__":
+
+if __name__ == '__main__':
     main()

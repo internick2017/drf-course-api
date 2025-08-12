@@ -1600,3 +1600,101 @@ def _get_applied_filters(request):
         'min_price': request.query_params.get('min_price', None),
         'max_price': request.query_params.get('max_price', None)
     }
+
+
+# Additional Update and Delete Generic Views
+
+class UserRetrieveUpdateDestroyAPIView(RetrieveUpdateDestroyAPIView):
+    """
+    Generic view for retrieving, updating, and deleting a single user
+
+    GET: Retrieve user details
+    PUT/PATCH: Update user (Admin only)
+    DELETE: Delete user (Admin only)
+
+    Available URL parameters:
+    - username: Username to identify the user
+    """
+    queryset = User.objects.all()
+    serializer_class = UserSerializer
+    permission_classes = [IsAdminOrReadOnly]
+    lookup_field = 'username'
+
+    def perform_update(self, serializer):
+        """Custom logic when updating a user"""
+        user = serializer.save()
+        print(f"User updated: {user.username}")
+
+    def perform_destroy(self, instance):
+        """Custom logic when deleting a user"""
+        print(f"User deleted: {instance.username}")
+        instance.delete()
+
+
+class OrderRetrieveUpdateDestroyAPIView(RetrieveUpdateDestroyAPIView):
+    """
+    Generic view for retrieving, updating, and deleting a single order
+
+    GET: Retrieve order details
+    PUT/PATCH: Update order (Admin only)
+    DELETE: Delete order (Admin only)
+
+    Available URL parameters:
+    - pk: Order UUID
+    """
+    queryset = Order.objects.all()
+    serializer_class = OrderSerializer
+    permission_classes = [IsAdminOrReadOnly]
+    lookup_field = 'pk'
+
+    def get_queryset(self):
+        """Apply user-specific filtering for orders"""
+        # Admins can see all orders, regular users see only their own
+        if self.request.user.is_staff:
+            return Order.objects.prefetch_related('items__product').all()
+        else:
+            return Order.objects.prefetch_related('items__product').filter(user=self.request.user)
+
+    def perform_update(self, serializer):
+        """Custom logic when updating an order"""
+        order = serializer.save()
+        print(f"Order updated: {order.order_id}")
+
+    def perform_destroy(self, instance):
+        """Custom logic when deleting an order"""
+        print(f"Order deleted: {instance.order_id}")
+        instance.delete()
+
+
+class OrderItemRetrieveUpdateDestroyAPIView(RetrieveUpdateDestroyAPIView):
+    """
+    Generic view for retrieving, updating, and deleting a single order item
+
+    GET: Retrieve order item details
+    PUT/PATCH: Update order item (Admin only)
+    DELETE: Delete order item (Admin only)
+
+    Available URL parameters:
+    - pk: Order item ID
+    """
+    queryset = OrderItem.objects.all()
+    serializer_class = OrderItemSerializer
+    permission_classes = [IsAdminOrReadOnly]
+
+    def get_queryset(self):
+        """Apply user-specific filtering for order items"""
+        # Admins can see all order items, regular users see only their own
+        if self.request.user.is_staff:
+            return OrderItem.objects.select_related('order', 'product').all()
+        else:
+            return OrderItem.objects.select_related('order', 'product').filter(order__user=self.request.user)
+
+    def perform_update(self, serializer):
+        """Custom logic when updating an order item"""
+        order_item = serializer.save()
+        print(f"Order item updated: {order_item.quantity}x {order_item.product.name}")
+
+    def perform_destroy(self, instance):
+        """Custom logic when deleting an order item"""
+        print(f"Order item deleted: {instance.quantity}x {instance.product.name}")
+        instance.delete()
