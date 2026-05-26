@@ -9,3 +9,8 @@ django-filter
 pillow
 sqlparse
 tzdata
+# Production
+gunicorn
+whitenoise
+psycopg2-binary
+dj-database-url
