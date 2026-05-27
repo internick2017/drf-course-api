@@ -30,6 +30,7 @@ from .filters import UserFilter, ProductFilter, OrderFilter, OrderItemFilter
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.exceptions import InvalidToken, TokenError
+from rest_framework.exceptions import AuthenticationFailed
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 
@@ -73,7 +74,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             response = super().post(request, *args, **kwargs)
             response.data['message'] = 'Login successful'
             return response
-        except InvalidToken as e:
+        except (InvalidToken, AuthenticationFailed) as e:
             return Response({
                 'error': 'Invalid credentials',
                 'detail': str(e)
@@ -87,7 +88,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
             return Response({
                 'error': 'Authentication failed',
                 'detail': str(e)
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            }, status=status.HTTP_401_UNAUTHORIZED)
 
 @extend_schema(
     summary="User registration",
