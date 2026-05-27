@@ -11,7 +11,13 @@ from django.db.models import Max, Avg, Q, Sum
 from django.utils.dateparse import parse_date
 import time
 import random
-from silk.profiling.profiler import silk_profile
+try:
+    from silk.profiling.profiler import silk_profile
+except ImportError:
+    def silk_profile(name=None):
+        def decorator(func):
+            return func
+        return decorator
 from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter  # type: ignore
 from drf_spectacular.types import OpenApiTypes  # type: ignore
 from .models import User, Product, Order, OrderItem
