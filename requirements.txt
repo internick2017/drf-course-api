@@ -3,7 +3,6 @@ Django
 django-extensions
 djangorestframework
 djangorestframework-simplejwt
-django-silk
 drf-spectacular
 django-filter
 pillow
